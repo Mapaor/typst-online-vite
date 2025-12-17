@@ -6,9 +6,9 @@
   set page(paper: "a4", margin: (x: 2.5cm, y: 2.5cm))
   set document(title: title, author: authors)
 
-  // 1) 字体：正文衬线 + 英文字体兜底（更像纸质阅读），标题单独用无衬线建立对比
+  // 1) 字体：正文衬线 + 英文字体兜底（更像纸质阅读），标题单独用无衬线建立对比，末尾添加 emoji 字体
   set text(
-    font: ("Libertinus Serif", "Noto Serif CJK SC"),
+    font: ("Libertinus Serif", "Noto Serif CJK SC", "Noto Color Emoji"),
     size: 12pt,
     lang: lang,
   )

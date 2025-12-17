@@ -19,93 +19,96 @@
 		return nav.startsWith('zh') ? 'zh' : 'en';
 	}
 
-	const shouldRedirect = browser && detectPreferredLang() !== DEFAULT_LANG;
-
 	onMount(() => {
 		if (!browser) return;
 		const target = detectPreferredLang();
-		if (target === DEFAULT_LANG) {
-			void goto(`/en/`, { replaceState: true, keepFocus: true });
-			return;
-		}
-		void goto(`/zh/`, { replaceState: true, keepFocus: true });
+		void goto(`/${target}/`, { replaceState: true });
 	});
 </script>
 
 <svelte:head>
-	<title>MDXport · Export Markdown to PDF</title>
-	<meta name="description" content="Convert Markdown to a beautifully typeset PDF in the browser (Typst + live preview)." />
+	<title>MDXport · Markdown to PDF, Perfect Typesetting</title>
+	<meta name="description" content="A delivery engine for AI-generated content. Runs entirely client-side, your data never leaves your browser. Auto-fix formatting issues with one click." />
+	
+	<!-- Hreflang for SEO -->
 	<link rel="canonical" href="/en/" />
-	<link rel="alternate" hreflang="en" href="/en/" />
 	<link rel="alternate" hreflang="zh-Hans" href="/zh/" />
+	<link rel="alternate" hreflang="en" href="/en/" />
 	<link rel="alternate" hreflang="x-default" href="/en/" />
+	
+	<!-- Open Graph -->
+	<meta property="og:title" content="MDXport · Markdown to PDF, Perfect Typesetting" />
+	<meta property="og:description" content="A delivery engine for AI-generated content. Runs entirely client-side, your data never leaves your browser." />
+	<meta property="og:type" content="website" />
+	<meta property="og:locale" content="en_US" />
+	<meta property="og:locale:alternate" content="zh_CN" />
 </svelte:head>
 
-{#if shouldRedirect}
-	<main class="landing">
-		<h1>MDXport</h1>
-		<p>正在跳转到中文… / Redirecting to Chinese…</p>
-		<div class="actions">
-			<span class="hint">未自动跳转？ / Not redirected?</span>
-			<a class="btn" href="/zh/">中文</a>
-			<a class="btn" href="/en/">English</a>
-		</div>
-	</main>
-{:else}
-	<main class="landing">
-		<h1>MDXport</h1>
-		<p>Redirecting…</p>
-		<div class="actions">
-			<span class="hint">Not redirected?</span>
-			<a class="btn" href="/en/">Open editor</a>
-			<a class="btn" href="/zh/">打开中文</a>
-		</div>
-	</main>
-{/if}
+<main class="redirect-page">
+	<h1>MDXport</h1>
+	<p class="loading">Redirecting...</p>
+	<div class="fallback">
+		<span>Not redirected?</span>
+		<a class="btn" href="/en/">English</a>
+		<a class="btn" href="/zh/">中文</a>
+	</div>
+</main>
 
 <style>
-	.landing {
-		min-height: 70vh;
-		display: grid;
-		place-content: center;
-		gap: 0.75rem;
+	.redirect-page {
+		min-height: 100vh;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 1rem;
 		text-align: center;
-		font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+		font-family: var(--font-sans);
 		padding: 2rem;
 	}
 
 	h1 {
 		margin: 0;
-		line-height: 1.1;
+		font-size: 2rem;
+		font-weight: 700;
+		letter-spacing: -0.02em;
 	}
 
-	p {
+	.loading {
 		margin: 0;
-		opacity: 0.75;
+		color: var(--color-gray-500);
+		font-size: 0.9rem;
 	}
 
-	.actions {
+	.fallback {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		justify-content: center;
+		margin-top: 1rem;
 		flex-wrap: wrap;
-		margin-top: 0.25rem;
+		justify-content: center;
 	}
 
-	.hint {
-		opacity: 0.7;
-		font-size: 0.95rem;
+	.fallback span {
+		color: var(--color-gray-400);
+		font-size: 0.875rem;
 	}
 
 	.btn {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		padding: 0.55rem 0.9rem;
-		border-radius: 10px;
-		background: #111827;
-		color: white;
+		padding: 0.5rem 1rem;
+		border-radius: 8px;
+		background: var(--color-gray-900);
+		color: var(--color-white);
+		font-size: 0.875rem;
+		font-weight: 500;
 		text-decoration: none;
+		transition: background 0.15s ease;
+	}
+
+	.btn:hover {
+		background: var(--color-gray-700);
 	}
 </style>

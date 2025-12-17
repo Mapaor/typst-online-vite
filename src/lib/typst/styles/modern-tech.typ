@@ -11,9 +11,9 @@
   )
   set document(title: title, author: authors)
 
-  // 2) 字体栈：英文/数字用高质量西文字体，中文优先无衬线（屏幕阅读更舒适）
+  // 2) 字体栈：英文/数字用高质量西文字体，中文优先无衬线（屏幕阅读更舒适），末尾添加 emoji 字体
   set text(
-    font: ("IBM Plex Sans", "Roboto", "Noto Sans CJK SC", "Noto Serif CJK SC"),
+    font: ("IBM Plex Sans", "Roboto", "Noto Sans CJK SC", "Noto Serif CJK SC", "Noto Color Emoji"),
     size: 10.5pt,
     lang: lang,
   )

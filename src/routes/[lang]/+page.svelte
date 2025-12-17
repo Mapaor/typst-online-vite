@@ -1,874 +1,969 @@
 <script lang="ts">
-	import { browser, dev } from '$app/environment';
-	import { goto } from '$app/navigation';
-	import { onMount, untrack } from 'svelte';
-	import { getPdfjs } from '$lib/pdf/pdfjs';
-	import { markdownToTypst } from '$lib/pipeline/markdownToTypst';
-	import { TypstWorkerClient } from '$lib/workers/typstClient';
-	import type { UILang } from '$lib/i18n/lang';
-
-	import 'pdfjs-dist/web/pdf_viewer.css';
-
-	import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
-	import type { PDFLinkService, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs';
-
-	function dedent(strings: TemplateStringsArray, ...values: unknown[]): string {
-		let text = strings[0] ?? '';
-		for (let i = 0; i < values.length; i++) {
-			text += String(values[i]) + (strings[i + 1] ?? '');
-		}
-
-		text = text.replace(/^\n/, '').replace(/\n\s*$/, '');
-		const lines = text.split('\n');
-		const indents = lines
-			.filter((line) => line.trim().length > 0)
-			.map((line) => (/^\s*/.exec(line)?.[0].length ?? 0));
-		const minIndent = indents.length ? Math.min(...indents) : 0;
-		return lines.map((line) => line.slice(minIndent)).join('\n');
-	}
-
-	const UI_TEXT = {
-		zh: {
-			subtitle: '一键把 Markdown 导出为 PDF（预览 + 下载）',
-			language: '语言',
-			markdown: 'Markdown',
-			pdfPreview: 'PDF 预览',
-			style: '排版',
-			autoPreview: '自动预览',
-			refresh: '刷新预览',
-			download: '下载',
-			print: '打印',
-			open: '新标签打开',
-			prev: '上一页',
-			next: '下一页',
-			fitWidth: '适应宽度',
-			generating: '正在生成预览…',
-			waiting: '等待生成预览…',
-			compilingHint: '正在生成预览（首次可能较慢，需要初始化 WASM/字体）。',
-			pastePlaceholder: '在这里粘贴 Markdown…',
-			diagnostics: '编译诊断',
-			generatedTypst: '生成的 Typst（用于排障）'
-		},
-		en: {
-			subtitle: 'Convert Markdown to PDF (preview + download)',
-			language: 'Language',
-			markdown: 'Markdown',
-			pdfPreview: 'PDF Preview',
-			style: 'Style',
-			autoPreview: 'Auto preview',
-			refresh: 'Refresh',
-			download: 'Download',
-			print: 'Print',
-			open: 'Open',
-			prev: 'Prev',
-			next: 'Next',
-			fitWidth: 'Fit width',
-			generating: 'Generating preview…',
-			waiting: 'Waiting for preview…',
-			compilingHint: 'Generating preview (first run may be slow while initializing WASM/fonts).',
-			pastePlaceholder: 'Paste Markdown here…',
-			diagnostics: 'Diagnostics',
-			generatedTypst: 'Generated Typst (debug)'
-		}
-	} as const;
-
-	type UiTextKey = keyof (typeof UI_TEXT)['zh'];
-
-	let { data }: { data: { lang: UILang } } = $props();
-	function t(key: UiTextKey): string {
-		return UI_TEXT[data.lang][key];
-	}
-
-	const DEFAULT_MARKDOWN: Record<UILang, string> = {
-		zh: dedent`
-			---
-			lang: zh
-			title: MDXport 技术文档示例
-			authors:
-			  - MDXport Team
-			date: 2025-12-17
-			---
-
-			# 概述
-
-			这是一段普通段落，包含 **加粗**、_斜体_、\`行内代码\`、以及一个 [内联链接](https://example.com)。
-
-			下面演示引用式链接：([Quarto][1])，以及另一个引用：[SvelteKit 配置文档][2]。
-
-			## 强制换行（Hard break）
-
-			这一行结尾用反斜杠强制换行\\
-			下一行会紧跟在同一段落里，但会换行。
-
-			---
+  import { browser } from '$app/environment'
+  import { goto } from '$app/navigation'
+  import { onMount } from 'svelte'
+  import { getPdfjs } from '$lib/pdf/pdfjs'
+  import { markdownToTypst } from '$lib/pipeline/markdownToTypst'
+  import { TypstWorkerClient } from '$lib/workers/typstClient'
+  import type { UILang } from '$lib/i18n/lang'
 
-			# 引用与列表
+  import 'pdfjs-dist/web/pdf_viewer.css'
 
-			> 这是引用块第一段，包含 **加粗** 和 \`code\`。
-			>
-			> - 引用块中的列表项 A
-			> - 引用块中的列表项 B
-			>   - 嵌套 1
-			>   - 嵌套 2
-
-			## 列表与嵌套
-
-			- 无序列表 1
-			- 无序列表 2
-			  1. 嵌套有序 1
-			  2. 嵌套有序 2
-			- 无序列表 3（含 [引用链接][2]）
-
-			1. 有序列表 1
-			2. 有序列表 2
-			   - 嵌套无序 a
-			   - 嵌套无序 b
-
-			---
-
-			# 代码块
-
-			\`\`\`ts
-			export function greet(name: string) {
-			  const msg = \`Hello, \${name}\`;
-			  return msg;
-			}
-			\`\`\`
-
-			[1]: https://quarto.org
-			[2]: https://svelte.dev/docs/kit/configuration
-		`,
-		en: dedent`
-			---
-			lang: en
-			title: MDXport Sample Document
-			authors:
-			  - MDXport Team
-			date: 2025-12-17
-			---
-
-			# Overview
-
-			This is a regular paragraph with **bold**, _italic_, \`inline code\`, and an [inline link](https://example.com).
-
-			Below is a reference-style link: ([Quarto][1]), and another one: [SvelteKit configuration][2].
-
-			## Hard line break
-
-			This line ends with a backslash for a hard break\\
-			The next line stays in the same paragraph, but breaks the line.
-
-			---
-
-			# Blockquote & Lists
-
-			> This is a blockquote paragraph with **bold** and \`code\`.
-			>
-			> - Item A
-			> - Item B
-			>   - Nested 1
-			>   - Nested 2
-
-			## Lists & Nesting
-
-			- Unordered 1
-			- Unordered 2
-			  1. Nested ordered 1
-			  2. Nested ordered 2
-			- Unordered 3 (with a [reference link][2])
-
-			1. Ordered 1
-			2. Ordered 2
-			   - Nested unordered a
-			   - Nested unordered b
-
-			---
-
-			# Code block
-
-			\`\`\`ts
-			export function greet(name: string) {
-			  const msg = \`Hello, \${name}\`;
-			  return msg;
-			}
-			\`\`\`
-
-			[1]: https://quarto.org
-			[2]: https://svelte.dev/docs/kit/configuration
-		`
-	};
-
-	let markdown = $state(DEFAULT_MARKDOWN.zh);
-	let status = $state<'idle' | 'compiling' | 'done' | 'error'>('idle');
-	let errorMessage = $state<string | null>(null);
-	let diagnostics = $state<string[]>([]);
-	let lastTypst = $state<string | null>(null);
-	let style = $state<'modern-tech' | 'classic-editorial'>('modern-tech');
-	let pdfBytes = $state<Uint8Array<ArrayBuffer> | null>(null);
-	let pdfUrl = $state<string | null>(null);
-	let autoPreview = $state(true);
-
-	let client = $state<TypstWorkerClient | null>(null);
-	let compileSeq = 0;
-	let hasEverCompiled = false;
-	let autoPreviewTimer: number | null = null;
-
-	let pdfDoc = $state<PDFDocumentProxy | null>(null);
-	let pdfPages = $state(0);
-	let pdfPage = $state(1);
-	let pdfScale = $state(1);
-	let pdfLoadStatus = $state<'idle' | 'loading' | 'error'>('idle');
-	let pdfError = $state<string | null>(null);
-
-	let pdfViewer = $state<PDFViewer | null>(null);
-	let pdfLinkService = $state<PDFLinkService | null>(null);
-
-	let pdfViewerContainerEl = $state<HTMLDivElement | null>(null);
-	let pdfViewerEl = $state<HTMLDivElement | null>(null);
-
-	let pdfLoadTask: PDFDocumentLoadingTask | null = null;
-	let pdfLoadSeq = 0;
-
-	const LANG_STORAGE_KEY = 'mdxport_lang';
-	let lastTemplateLang: UILang = 'zh';
-	let langInitialized = false;
-
-	onMount(() => {
-		client = new TypstWorkerClient();
-
-		let aborted = false;
-		void (async () => {
-			const container = pdfViewerContainerEl;
-			const viewer = pdfViewerEl;
-			if (!container || !viewer) return;
-
-			await getPdfjs();
-			const mod = await import('pdfjs-dist/web/pdf_viewer.mjs');
-			if (aborted) return;
-
-			const eventBus = new mod.EventBus();
-			const linkService = new mod.PDFLinkService({ eventBus });
-			const pdfViewerInstance = new mod.PDFViewer({
-				container,
-				viewer,
-				eventBus,
-				linkService
-			});
-			linkService.setViewer(pdfViewerInstance);
-
-			eventBus.on('pagesinit', () => {
-				pdfViewerInstance.currentScaleValue = 'page-width';
-			});
-			eventBus.on('pagechanging', (event: { pageNumber: number }) => {
-				pdfPage = event.pageNumber;
-			});
-			eventBus.on('scalechanging', (event: { scale: number }) => {
-				pdfScale = event.scale;
-			});
-
-			pdfLinkService = linkService;
-			pdfViewer = pdfViewerInstance;
-
-			if (pdfDoc) {
-				linkService.setDocument(pdfDoc);
-				pdfViewerInstance.setDocument(pdfDoc);
-			}
-		})().catch((error) => {
-			console.error(error);
-		});
-
-		return () => {
-			aborted = true;
-			client?.dispose();
-			pdfLoadTask?.destroy();
-			clearPdfViewerDocument();
-			pdfDoc?.destroy();
-			if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-		};
-	});
-
-	$effect(() => {
-		if (!browser) return;
-
-		const lang = data.lang;
-		try {
-			localStorage.setItem(LANG_STORAGE_KEY, lang);
-		} catch {
-			// ignore
-		}
-
-		const current = untrack(() => markdown);
-		if (!langInitialized) {
-			langInitialized = true;
-			lastTemplateLang = lang;
-			if (lang !== 'zh' && current === DEFAULT_MARKDOWN.zh) {
-				markdown = DEFAULT_MARKDOWN[lang];
-			}
-			return;
-		}
-
-		if (lang !== lastTemplateLang && current === DEFAULT_MARKDOWN[lastTemplateLang]) {
-			markdown = DEFAULT_MARKDOWN[lang];
-		}
-		lastTemplateLang = lang;
-	});
-
-	$effect(() => {
-		if (!browser) return;
-		if (!pdfPages) return;
-		if (pdfPage < 1) pdfPage = 1;
-		if (pdfPage > pdfPages) pdfPage = pdfPages;
-	});
-
-	$effect(() => {
-		if (!browser) return;
-		if (!pdfPages) return;
-		if (!pdfViewer) return;
-		if (!pdfDoc) return;
-
-		const next = Number.isFinite(pdfPage) ? Math.trunc(pdfPage) : 1;
-		if (next < 1 || next > pdfPages) return;
-		if (pdfViewer.currentPageNumber === next) return;
-		pdfViewer.currentPageNumber = next;
-	});
-
-	$effect(() => {
-		if (!browser) return;
-		const bytes = pdfBytes;
-		if (!bytes) {
-			pdfLoadTask?.destroy();
-			clearPdfViewerDocument();
-			pdfDoc?.destroy();
-			pdfDoc = null;
-			pdfPages = 0;
-			pdfPage = 1;
-			pdfScale = 1;
-			pdfLoadStatus = 'idle';
-			pdfError = null;
-			return;
-		}
-
-		const seq = ++pdfLoadSeq;
-		pdfLoadStatus = 'loading';
-		pdfError = null;
-
-		void (async () => {
-			pdfLoadTask?.destroy();
-
-			const pdfjs = await getPdfjs();
-			const task: PDFDocumentLoadingTask = pdfjs.getDocument({ data: bytes });
-			pdfLoadTask = task;
-
-			const doc: PDFDocumentProxy = await task.promise;
-			if (seq !== pdfLoadSeq) {
-				void doc.destroy();
-				return;
-			}
-
-			void pdfDoc?.destroy();
-			pdfDoc = doc;
-			pdfPages = doc.numPages;
-			pdfPage = 1;
-
-			pdfLinkService?.setDocument(doc);
-			pdfViewer?.setDocument(doc);
-			pdfLoadStatus = 'idle';
-		})().catch((error) => {
-			if (seq !== pdfLoadSeq) return;
-			pdfLoadStatus = 'error';
-			pdfError = error instanceof Error ? error.message : String(error);
-		});
-	});
-
-	$effect(() => {
-		if (!browser) return;
-		if (!autoPreview) return;
-		if (!client) return;
-
-		const md = markdown;
-		const _style = style;
-		const _lang = data.lang;
-		if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer);
-
-		const delay = hasEverCompiled ? 450 : 0;
-		autoPreviewTimer = window.setTimeout(() => {
-			void compile(md, _style, _lang);
-		}, delay);
-
-		return () => {
-			if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer);
-		};
-	});
-
-	async function exportPdf() {
-		await compile(markdown, style, data.lang);
-	}
-
-	function onLangChange(event: Event) {
-		const next = (event.currentTarget as HTMLSelectElement | null)?.value as UILang | undefined;
-		if (!next || next === data.lang) return;
-		try {
-			localStorage.setItem(LANG_STORAGE_KEY, next);
-		} catch {
-			// ignore
-		}
-		void goto(`/${next}/`);
-	}
-
-	function clearPdfViewerDocument() {
-		if (pdfViewer) {
-			(pdfViewer as unknown as { setDocument: (doc: PDFDocumentProxy | null) => void }).setDocument(null);
-		}
-		if (pdfLinkService) {
-			(
-				pdfLinkService as unknown as {
-					setDocument: (doc: PDFDocumentProxy | null, baseUrl?: string | null) => void;
-				}
-			).setDocument(null);
-		}
-	}
-
-	function setPdfPreview(bytes: Uint8Array<ArrayBuffer>) {
-		pdfBytes = bytes;
-		if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-		const blob = new Blob([bytes], { type: 'application/pdf' });
-		pdfUrl = URL.createObjectURL(blob);
-	}
-
-	function fitWidth() {
-		if (!pdfViewer) return;
-		pdfViewer.currentScaleValue = 'page-width';
-	}
-
-	function zoomIn() {
-		if (!pdfViewer) return;
-		pdfViewer.currentScale = Math.min(pdfViewer.currentScale * 1.2, 4);
-	}
-
-	function zoomOut() {
-		if (!pdfViewer) return;
-		pdfViewer.currentScale = Math.max(pdfViewer.currentScale / 1.2, 0.25);
-	}
-
-	function prevPage() {
-		if (pdfPage > 1) pdfPage -= 1;
-	}
-
-	function nextPage() {
-		if (pdfPages && pdfPage < pdfPages) pdfPage += 1;
-	}
-
-	async function compile(md: string, nextStyle: typeof style, lang: UILang) {
-		if (!client) return;
-		hasEverCompiled = true;
-
-		const seq = ++compileSeq;
-		status = 'compiling';
-		errorMessage = null;
-		diagnostics = [];
-
-		try {
-			const mainTypst = markdownToTypst(md, { style: nextStyle, lang });
-			if (dev) lastTypst = mainTypst;
-			const { pdf, diagnostics: diag } = await client.compilePdf(mainTypst);
-			if (seq !== compileSeq) return;
-			if (dev) diagnostics = diag;
-			setPdfPreview(pdf);
-			status = 'done';
-		} catch (error) {
-			if (seq !== compileSeq) return;
-			status = 'error';
-			errorMessage = error instanceof Error ? error.message : String(error);
-		}
-	}
-
-	function downloadPdf() {
-		if (!pdfUrl) return;
-		const a = document.createElement('a');
-		a.href = pdfUrl;
-		a.download = 'mdxport.pdf';
-		a.click();
-	}
-
-	function printPdf() {
-		if (!pdfUrl) return;
-
-		const iframe = document.createElement('iframe');
-		iframe.style.position = 'fixed';
-		iframe.style.right = '0';
-		iframe.style.bottom = '0';
-		iframe.style.width = '0';
-		iframe.style.height = '0';
-		iframe.style.border = '0';
-		iframe.src = pdfUrl;
-		iframe.onload = () => {
-			try {
-				iframe.contentWindow?.focus();
-				iframe.contentWindow?.print();
-			} finally {
-				window.setTimeout(() => {
-					iframe.remove();
-				}, 800);
-			}
-		};
-		document.body.appendChild(iframe);
-	}
+  import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
+  import type { PDFLinkService, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
+
+  // Get language from route params
+  let { data }: { data: { lang: UILang } } = $props()
+
+  // ========================================
+  // Default Markdown Content (as README)
+  // ========================================
+  const WELCOME_MARKDOWN = {
+    zh: `---
+lang: zh
+title: MDXport 功能演示
+authors:
+  - MDXport Team
+date: ${new Date().toISOString().split('T')[0]}
+---
+
+# 欢迎使用 MDXport
+
+*试着修改这段文字，右侧会实时更新...*
+
+## 核心亮点
+
+| 特性 | 说明 |
+| :--- | :--- |
+| **🛡️ 隐私优先** | 基于 WASM 技术，所有数据都在浏览器本地处理，绝不上传服务器 |
+| **✨ 智能修复** | 自动修复 AI 生成的 Markdown 排版问题：表格溢出、层级混乱、格式错误 |
+| **📄 商务排版** | 内置思源宋体等中文字体，专业文档一键生成，所见即所得 |
+| **⚡ 即开即用** | 无需安装、无需登录，打开网页直接使用 |
+
+## 快速开始
+
+1. 粘贴你的 **ChatGPT / Claude** 草稿到左侧编辑器
+2. 观察右侧预览，排版问题会被自动修正
+3. 点击右上角 **"导出 PDF"** 下载文档
+
+---
+
+## 排版功能演示
+
+### 文本格式
+
+这是一段普通段落，包含 **加粗**、_斜体_、\`行内代码\`、以及一个 [内联链接](https://example.com)。
+
+### 嵌套列表
+
+- 产品特性
+  - 客户端运行
+  - 隐私保护
+- 技术架构
+  1. Typst 排版引擎
+  2. WebAssembly 编译
+  3. PDF.js 预览
+
+### 代码块
+
+\`\`\`typescript
+// 一切都在本地处理
+const markdown = editor.getValue();
+const pdf = await compile(markdown);
+download(pdf);
+\`\`\`
+
+> **提示**：你可以拖放 \`.md\` 文件到编辑器直接导入，或使用顶部的模板快速开始。
+`,
+    en: `---
+lang: en
+title: MDXport Feature Demo
+authors:
+  - MDXport Team
+date: ${new Date().toISOString().split('T')[0]}
+---
+
+# Welcome to MDXport
+
+*Try editing this text — the preview updates in real-time...*
+
+## Key Features
+
+| Feature | Description |
+| :--- | :--- |
+| **🛡️ Privacy First** | Powered by WASM, all processing happens locally in your browser. No data upload. |
+| **✨ Smart Cleanup** | Auto-fix AI-generated Markdown issues: table overflow, broken hierarchy, formatting errors |
+| **📄 Pro Typesetting** | Built-in professional fonts, business-ready documents, what you see is what you get |
+| **⚡ Zero Setup** | No installation, no login required. Just open and use. |
+
+## Quick Start
+
+1. Paste your **ChatGPT / Claude** draft into the left editor
+2. Watch the right panel — formatting issues are auto-corrected
+3. Click **"Export PDF"** in the top-right corner to download
+
+---
+
+## Typesetting Demo
+
+### Text Formatting
+
+This is a regular paragraph with **bold**, _italic_, \`inline code\`, and an [inline link](https://example.com).
+
+### Nested Lists
+
+- Product Features
+  - Client-side processing
+  - Privacy protection
+- Tech Stack
+  1. Typst typesetting engine
+  2. WebAssembly compilation
+  3. PDF.js preview
+
+### Code Block
+
+\`\`\`typescript
+// Everything is processed locally
+const markdown = editor.getValue();
+const pdf = await compile(markdown);
+download(pdf);
+\`\`\`
+
+> **Tip**: You can drag and drop \`.md\` files into the editor, or use the templates in the top bar to get started quickly.
+`,
+  }
+
+  const TEMPLATES = {
+    zh: {
+      empty: { name: '空白文档', content: '' },
+      welcome: { name: '快速入门', content: WELCOME_MARKDOWN.zh },
+      techDoc: {
+        name: '技术方案',
+        content: `---
+title: 技术方案文档
+date: ${new Date().toISOString().split('T')[0]}
+---
+
+# 项目概述
+
+## 背景
+1. Phase 1
+2. Phase 2
+3. Phase 3
+
+## Risk Assessment
+
+## Summary
+`,
+      },
+      weeklyReport: {
+        name: 'Weekly Report',
+        content: `# Weekly Report - ${new Date().toISOString().split('T')[0]}
+
+## Completed
+
+- [ ] Task 1
+- [ ] Task 2
+
+## Next Week
+
+- [ ] Plan 1
+- [ ] Plan 2
+
+## Issues & Risks
+
+## Notes
+`,
+      },
+    },
+  }
+
+  // ========================================
+  // State
+  // ========================================
+  let filename = $state('Untitled.md')
+  let markdown = $state(WELCOME_MARKDOWN[data.lang])
+  let style = $state<'modern-tech' | 'classic-editorial'>('modern-tech')
+
+  // Loading state
+  let isLoading = $state(true)
+  let loadingText = $state('Initializing...')
+
+  // Compile state
+  let status = $state<'idle' | 'compiling' | 'done' | 'error'>('idle')
+  let errorMessage = $state<string | null>(null)
+  let pdfBytes = $state<Uint8Array<ArrayBuffer> | null>(null)
+  let pdfUrl = $state<string | null>(null)
+
+  // PDF Viewer state
+  let client = $state<TypstWorkerClient | null>(null)
+  let pdfDoc = $state<PDFDocumentProxy | null>(null)
+  let pdfPages = $state(0)
+  let pdfPage = $state(1)
+  let pdfScale = $state(1)
+  let pdfViewer = $state<PDFViewer | null>(null)
+  let pdfLinkService = $state<PDFLinkService | null>(null)
+  let pdfViewerContainerEl = $state<HTMLDivElement | null>(null)
+  let pdfViewerEl = $state<HTMLDivElement | null>(null)
+  let pdfLoadTask: PDFDocumentLoadingTask | null = null
+  let pdfLoadSeq = 0
+
+  // Resizer state
+  let leftPaneWidth = $state(50)
+  let isResizing = $state(false)
+
+  // Drag & drop state
+  let isDragging = $state(false)
+
+  // Auto-compile
+  let compileSeq = 0
+  let hasEverCompiled = false
+  let autoPreviewTimer: number | null = null
+
+  // UI Text
+  const UI = {
+    zh: {
+      new: '新建',
+      template: '模板',
+      export: '导出 PDF',
+      loading: '正在初始化渲染引擎...',
+      generating: '生成中...',
+      langSwitch: 'EN',
+      placeholder: '在这里输入 Markdown...',
+    },
+    en: {
+      new: 'New',
+      template: 'Template',
+      export: 'Export PDF',
+      loading: 'Initializing rendering engine...',
+      generating: 'Generating...',
+      langSwitch: '中',
+      placeholder: 'Type Markdown here...',
+    },
+  }
+
+  // SEO Metadata
+  const SEO = {
+    zh: {
+      title: 'MDXport · Markdown 转 PDF，排版一步到位',
+      description:
+        '专为 AI 生成内容设计的交付引擎。纯客户端运行，数据绝不上传，隐私零风险。自动修复排版错乱，一键解决表格溢出与层级问题。',
+      ogLocale: 'zh_CN',
+    },
+    en: {
+      title: 'MDXport · Markdown to PDF, Perfect Typesetting',
+      description:
+        'A delivery engine for AI-generated content. Runs entirely client-side, your data never leaves your browser. Auto-fix formatting issues with one click.',
+      ogLocale: 'en_US',
+    },
+  }
+
+  function t<K extends keyof typeof UI.zh>(key: K): string {
+    return UI[data.lang][key]
+  }
+
+  // ========================================
+  // Lifecycle
+  // ========================================
+  onMount(() => {
+    // Save language preference
+    try {
+      localStorage.setItem('mdxport_lang', data.lang)
+    } catch {
+      // ignore
+    }
+
+    loadingText = t('loading')
+    client = new TypstWorkerClient()
+
+    let aborted = false
+
+    void (async () => {
+      const container = pdfViewerContainerEl
+      const viewer = pdfViewerEl
+      if (!container || !viewer) return
+
+      await getPdfjs()
+      const mod = await import('pdfjs-dist/web/pdf_viewer.mjs')
+      if (aborted) return
+
+      const eventBus = new mod.EventBus()
+      const linkService = new mod.PDFLinkService({ eventBus })
+      const pdfViewerInstance = new mod.PDFViewer({
+        container,
+        viewer,
+        eventBus,
+        linkService,
+      })
+      linkService.setViewer(pdfViewerInstance)
+
+      eventBus.on('pagesinit', () => {
+        pdfViewerInstance.currentScaleValue = 'page-width'
+      })
+      eventBus.on('pagechanging', (event: { pageNumber: number }) => {
+        pdfPage = event.pageNumber
+      })
+      eventBus.on('scalechanging', (event: { scale: number }) => {
+        pdfScale = event.scale
+      })
+
+      pdfLinkService = linkService
+      pdfViewer = pdfViewerInstance
+
+      // Hide loading overlay
+      isLoading = false
+
+      // Trigger first compile
+      void compile(markdown, style, data.lang)
+    })().catch((error) => {
+      console.error(error)
+      isLoading = false
+    })
+
+    return () => {
+      aborted = true
+      client?.dispose()
+      pdfLoadTask?.destroy()
+      pdfDoc?.destroy()
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl)
+    }
+  })
+
+  // Track previous language to detect changes
+  let prevLang: UILang | null = null
+
+  $effect(() => {
+    if (!browser) return
+    const currentLang = data.lang
+
+    // Set html lang attribute
+    document.documentElement.lang = currentLang
+
+    // Save language preference
+    try {
+      localStorage.setItem('mdxport_lang', currentLang)
+    } catch {
+      // ignore
+    }
+
+    // Update default content when language changes
+    if (prevLang !== null && prevLang !== currentLang) {
+      // Check if current content is the old default template
+      const oldDefault = WELCOME_MARKDOWN[prevLang]
+      if (markdown === oldDefault || markdown.trim() === '') {
+        markdown = WELCOME_MARKDOWN[currentLang]
+      }
+    }
+    prevLang = currentLang
+  })
+
+  $effect(() => {
+    if (!browser) return
+    if (!client) return
+    if (isLoading) return
+
+    const md = markdown
+    const _style = style
+    const _lang = data.lang
+
+    if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
+
+    const delay = hasEverCompiled ? 450 : 0
+    autoPreviewTimer = window.setTimeout(() => {
+      void compile(md, _style, _lang)
+    }, delay)
+
+    return () => {
+      if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
+    }
+  })
+
+  $effect(() => {
+    if (!browser) return
+    const bytes = pdfBytes
+    if (!bytes) {
+      pdfLoadTask?.destroy()
+      pdfDoc?.destroy()
+      pdfDoc = null
+      pdfPages = 0
+      pdfPage = 1
+      pdfScale = 1
+      return
+    }
+
+    const seq = ++pdfLoadSeq
+
+    void (async () => {
+      pdfLoadTask?.destroy()
+
+      const pdfjs = await getPdfjs()
+      const task: PDFDocumentLoadingTask = pdfjs.getDocument({ data: bytes })
+      pdfLoadTask = task
+
+      const doc: PDFDocumentProxy = await task.promise
+      if (seq !== pdfLoadSeq) {
+        void doc.destroy()
+        return
+      }
+
+      void pdfDoc?.destroy()
+      pdfDoc = doc
+      pdfPages = doc.numPages
+      pdfPage = 1
+
+      pdfLinkService?.setDocument(doc)
+      pdfViewer?.setDocument(doc)
+    })().catch((error) => {
+      console.error(error)
+    })
+  })
+
+  // ========================================
+  // Functions
+  // ========================================
+  async function compile(md: string, nextStyle: typeof style, docLang: UILang) {
+    if (!client) return
+    hasEverCompiled = true
+
+    const seq = ++compileSeq
+    status = 'compiling'
+    errorMessage = null
+
+    try {
+      const mainTypst = markdownToTypst(md, { style: nextStyle, lang: docLang })
+      const { pdf } = await client.compilePdf(mainTypst)
+      if (seq !== compileSeq) return
+      setPdfPreview(pdf)
+      status = 'done'
+    } catch (error) {
+      if (seq !== compileSeq) return
+      status = 'error'
+      errorMessage = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  function setPdfPreview(bytes: Uint8Array<ArrayBuffer>) {
+    pdfBytes = bytes
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl)
+    const blob = new Blob([bytes], { type: 'application/pdf' })
+    pdfUrl = URL.createObjectURL(blob)
+  }
+
+  function downloadPdf() {
+    if (!pdfUrl) return
+    const a = document.createElement('a')
+    a.href = pdfUrl
+    a.download = filename.replace(/\.md$/i, '') + '.pdf'
+    a.click()
+  }
+
+  function handleNew() {
+    markdown = ''
+    filename = 'Untitled.md'
+  }
+
+  function handleHelp() {
+    const defaultContent = WELCOME_MARKDOWN[data.lang]
+    if (markdown.trim() !== '' && markdown !== defaultContent) {
+      const msg =
+        data.lang === 'zh'
+          ? '这将覆盖当前内容，确定吗？'
+          : 'This will overwrite current content. Continue?'
+      if (!confirm(msg)) return
+    }
+    markdown = defaultContent
+    filename = 'README.md'
+  }
+
+  function switchLang() {
+    const targetLang = data.lang === 'zh' ? 'en' : 'zh'
+    void goto(`/${targetLang}/`)
+  }
+
+  // ========================================
+  // Resizer Logic
+  // ========================================
+  function startResize(e: MouseEvent) {
+    e.preventDefault()
+    isResizing = true
+    document.addEventListener('mousemove', onResize)
+    document.addEventListener('mouseup', stopResize)
+  }
+
+  function onResize(e: MouseEvent) {
+    if (!isResizing) return
+    const containerWidth = window.innerWidth
+    const newWidth = (e.clientX / containerWidth) * 100
+    leftPaneWidth = Math.min(Math.max(newWidth, 20), 80)
+  }
+
+  function stopResize() {
+    isResizing = false
+    document.removeEventListener('mousemove', onResize)
+    document.removeEventListener('mouseup', stopResize)
+  }
+
+  // ========================================
+  // Drag & Drop Logic
+  // ========================================
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault()
+    isDragging = true
+  }
+
+  function handleDragLeave(e: DragEvent) {
+    e.preventDefault()
+    isDragging = false
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault()
+    isDragging = false
+
+    const files = e.dataTransfer?.files
+    if (!files || files.length === 0) return
+
+    const file = files[0]
+    if (
+      !file.name.endsWith('.md') &&
+      !file.name.endsWith('.markdown') &&
+      !file.name.endsWith('.txt')
+    ) {
+      return
+    }
+
+    filename = file.name.replace(/\.(markdown|txt)$/i, '.md')
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const content = event.target?.result
+      if (typeof content === 'string') {
+        markdown = content
+      }
+    }
+    reader.readAsText(file)
+  }
+
+  function fitWidth() {
+    if (!pdfViewer) return
+    pdfViewer.currentScaleValue = 'page-width'
+  }
 </script>
 
-<main>
-	<header class="topbar">
-		<div class="topbar-title">
-			<h1>MDXport</h1>
-			<p>{t('subtitle')}</p>
-		</div>
-		<div class="topbar-controls">
-				<label class="select">
-					{t('language')}
-					<select value={data.lang} onchange={onLangChange} disabled={status === 'compiling'}>
-						<option value="zh">中文</option>
-						<option value="en">English</option>
-					</select>
-				</label>
-		</div>
-	</header>
+<svelte:head>
+  <title>{SEO[data.lang].title}</title>
+  <meta name="description" content={SEO[data.lang].description} />
 
-	<div class="split">
-		<section class="panel editor">
-			<div class="panel-header">
-				<h2>{t('markdown')}</h2>
-			</div>
+  <!-- Canonical & Hreflang -->
+  <link rel="canonical" href={`/${data.lang}/`} />
+  <link rel="alternate" hreflang="zh-Hans" href="/zh/" />
+  <link rel="alternate" hreflang="en" href="/en/" />
+  <link rel="alternate" hreflang="x-default" href="/en/" />
 
-			<textarea
-				id="md"
-				bind:value={markdown}
-				spellcheck="false"
-				placeholder={t('pastePlaceholder')}
-			></textarea>
+  <!-- Open Graph -->
+  <meta property="og:title" content={SEO[data.lang].title} />
+  <meta property="og:description" content={SEO[data.lang].description} />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content={SEO[data.lang].ogLocale} />
+  <meta
+    property="og:locale:alternate"
+    content={data.lang === 'zh' ? 'en_US' : 'zh_CN'}
+  />
 
-			{#if status === 'compiling'}
-				<div class="hint">{t('compilingHint')}</div>
-			{/if}
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content={SEO[data.lang].title} />
+  <meta name="twitter:description" content={SEO[data.lang].description} />
+</svelte:head>
 
-			{#if errorMessage}
-				<pre class="error">{errorMessage}</pre>
-			{/if}
+<!-- Loading Overlay -->
+<div class="loading-overlay" class:hidden={!isLoading}>
+  <div class="loading-spinner"></div>
+  <div class="loading-progress">
+    <div class="loading-progress-bar"></div>
+  </div>
+  <div class="loading-text">{loadingText}</div>
+</div>
 
-			{#if dev && diagnostics.length}
-				<details class="diag">
-					<summary>{t('diagnostics')} ({diagnostics.length})</summary>
-					<pre>{diagnostics.join('\n')}</pre>
-				</details>
-			{/if}
+<!-- Main App -->
+<div
+  class="app"
+  class:drop-zone-active={isDragging}
+  ondragover={handleDragOver}
+  ondragleave={handleDragLeave}
+  ondrop={handleDrop}
+  role="application"
+>
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div class="navbar-left">
+      <span class="logo"><strong>MDXport</strong></span>
+    </div>
+    <div class="navbar-center">
+      <input
+        type="text"
+        class="input-filename"
+        bind:value={filename}
+        spellcheck="false"
+      />
+    </div>
+    <div class="navbar-right">
+      <button class="btn btn-ghost btn-sm" onclick={handleNew}>
+        {t('new')}
+      </button>
 
-			{#if dev && lastTypst}
-				<details class="typst">
-					<summary>{t('generatedTypst')}</summary>
-					<pre>{lastTypst}</pre>
-				</details>
-			{/if}
-		</section>
+      <button
+        class="nav-icon btn-ghost btn-sm"
+        onclick={handleHelp}
+        title={data.lang === 'zh' ? '查看说明书' : 'View Guide'}
+        style="width: 32px; padding: 0;"
+      >
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+      </button>
 
-		<section class="panel preview">
-			<div class="panel-header">
-				<h2>{t('pdfPreview')}</h2>
-				<div class="controls">
-						<label class="select">
-							{t('style')}
-							<select bind:value={style} disabled={status === 'compiling'}>
-								<option value="modern-tech">{data.lang === 'zh' ? '现代科技风' : 'Modern Tech'}</option>
-								<option value="classic-editorial">{data.lang === 'zh' ? '经典阅读风' : 'Classic Editorial'}</option>
-							</select>
-						</label>
-					<label class="toggle">
-						<input type="checkbox" bind:checked={autoPreview} />
-						{t('autoPreview')}
-					</label>
-					<button onclick={exportPdf} disabled={!client || status === 'compiling'}>{t('refresh')}</button>
-					<button onclick={downloadPdf} disabled={!pdfUrl || status === 'compiling'}>{t('download')}</button>
-					<button onclick={printPdf} disabled={!pdfUrl || status === 'compiling'}>{t('print')}</button>
-					<a class="open {pdfUrl ? '' : 'disabled'}" href={pdfUrl ?? '#'} target="_blank" rel="noreferrer"
-						>{t('open')}</a
-					>
-				</div>
-			</div>
+      <select class="style-select" bind:value={style}>
+        <option value="modern-tech"
+          >{data.lang === 'zh' ? '现代风' : 'Modern'}</option
+        >
+        <option value="classic-editorial"
+          >{data.lang === 'zh' ? '经典风' : 'Classic'}</option
+        >
+      </select>
 
-			<div class="pdf-toolbar">
-				<div class="pager">
-					<button onclick={prevPage} disabled={!pdfDoc || pdfPage <= 1}>{t('prev')}</button>
-					<input
-						class="page"
-						type="number"
-						min="1"
-						max={pdfPages || 1}
-						bind:value={pdfPage}
-						disabled={!pdfDoc || pdfLoadStatus === 'loading'}
-					/>
-					<span class="total">/ {pdfPages || '—'}</span>
-					<button onclick={nextPage} disabled={!pdfDoc || (pdfPages ? pdfPage >= pdfPages : true)}>{t('next')}</button>
-				</div>
-				<div class="zoom">
-					<button onclick={zoomOut} disabled={!pdfDoc}>-</button>
-					<span class="percent">{Math.round(pdfScale * 100)}%</span>
-					<button onclick={zoomIn} disabled={!pdfDoc}>+</button>
-					<button onclick={fitWidth} disabled={!pdfDoc}>{t('fitWidth')}</button>
-				</div>
-			</div>
+      <button
+        class="btn btn-primary btn-sm"
+        onclick={downloadPdf}
+        disabled={!pdfUrl || status === 'compiling'}
+      >
+        {status === 'compiling' ? t('generating') : t('export')}
+      </button>
 
-			<div class="pdf-body">
-				<div class="pdfjs-container" bind:this={pdfViewerContainerEl}>
-					<div class="pdfViewer" bind:this={pdfViewerEl}></div>
-				</div>
+      <button class="btn btn-ghost btn-sm" onclick={switchLang}>
+        {t('langSwitch')}
+      </button>
 
-				{#if !pdfBytes || pdfLoadStatus === 'loading'}
-					<div class="placeholder overlay">
-						{#if status === 'compiling' || pdfLoadStatus === 'loading'}
-							{t('generating')}
-						{:else}
-							{t('waiting')}
-						{/if}
-					</div>
-				{/if}
-			</div>
+      <a
+        href="https://github.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="nav-icon"
+        aria-label="GitHub"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path
+            d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+          />
+        </svg>
+      </a>
+    </div>
+  </nav>
 
-			{#if pdfError}
-				<pre class="error">{pdfError}</pre>
-			{/if}
-		</section>
-	</div>
-</main>
+  <!-- Workspace -->
+  <main class="workspace">
+    <!-- Editor Pane -->
+    <section class="pane editor-pane" style="width: {leftPaneWidth}%">
+      <textarea
+        class="editor"
+        bind:value={markdown}
+        spellcheck="false"
+        placeholder={t('placeholder')}
+      ></textarea>
+      {#if errorMessage}
+        <div class="error-bar">{errorMessage}</div>
+      {/if}
+    </section>
 
-	<style>
-			main {
-				box-sizing: border-box;
-				padding: 2rem clamp(1rem, 3vw, 2rem) 3rem;
-				font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-			}
+    <!-- Resizer -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      class="resizer"
+      class:active={isResizing}
+      onmousedown={startResize}
+      role="separator"
+      aria-orientation="vertical"
+      tabindex="0"
+    ></div>
 
-	.topbar {
-		display: flex;
-		align-items: flex-end;
-		justify-content: space-between;
-		gap: 0.75rem;
-		flex-wrap: wrap;
-	}
+    <!-- Preview Pane -->
+    <section class="pane preview-pane" style="width: {100 - leftPaneWidth}%">
+      <div class="preview-toolbar">
+        <div class="pager">
+          <button
+            onclick={() => pdfPage > 1 && (pdfPage -= 1)}
+            disabled={!pdfDoc || pdfPage <= 1}>←</button
+          >
+          <span class="page-info">{pdfPage} / {pdfPages || '—'}</span>
+          <button
+            onclick={() => pdfPages && pdfPage < pdfPages && (pdfPage += 1)}
+            disabled={!pdfDoc || pdfPage >= pdfPages}>→</button
+          >
+        </div>
+        <div class="zoom">
+          <span class="zoom-level">{Math.round(pdfScale * 100)}%</span>
+          <button onclick={fitWidth} disabled={!pdfDoc}>Fit</button>
+        </div>
+      </div>
+      <div class="preview-container">
+        <div class="pdfjs-container" bind:this={pdfViewerContainerEl}>
+          <div class="pdfViewer" bind:this={pdfViewerEl}></div>
+        </div>
+        {#if status === 'compiling' && !pdfBytes}
+          <div class="preview-placeholder">
+            <div class="loading-spinner"></div>
+          </div>
+        {/if}
+      </div>
+    </section>
+  </main>
+</div>
 
-	.topbar-title h1 {
-		margin: 0;
-		line-height: 1.1;
-	}
+<style>
+  /* ========================================
+	   App Container
+	   ======================================== */
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
 
-	.topbar-title p {
-		margin: 0.5rem 0 0;
-		opacity: 0.7;
-	}
+  /* ========================================
+	   Navbar
+	   ======================================== */
+  .navbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: var(--navbar-height);
+    padding: 0 var(--space-md);
+    background: var(--color-white);
+    border-bottom: 1px solid var(--color-gray-200);
+    flex-shrink: 0;
+  }
 
-	.topbar-controls {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-	}
+  .navbar-left,
+  .navbar-center,
+  .navbar-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
 
-	.panel {
-		min-width: 0;
-		margin-top: 1.5rem;
-		display: grid;
-		gap: 0.75rem;
-	}
+  .navbar-left {
+    flex: 0 0 auto;
+  }
 
-	.split {
-		--pane-height: min(75vh, 820px);
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-		gap: 1rem;
-		align-items: start;
-	}
+  .navbar-center {
+    flex: 1;
+    justify-content: center;
+  }
 
-		@media (max-width: 900px) {
-			.split {
-				grid-template-columns: 1fr;
-			}
-		}
+  .navbar-right {
+    flex: 0 0 auto;
+    gap: var(--space-xs);
+  }
 
-	.panel {
-		padding: 1rem;
-		border-radius: 12px;
-		border: 1px solid rgba(0, 0, 0, 0.12);
-	}
+  .logo {
+    font-size: 1rem;
+    letter-spacing: -0.02em;
+  }
 
-	.panel-header {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 0.75rem;
-	}
+  .nav-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    color: var(--color-gray-500);
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+  }
 
-	.panel-header h2 {
-		margin: 0;
-		font-size: 1.05rem;
-	}
+  .nav-icon:hover {
+    background: var(--color-gray-100);
+    color: var(--color-gray-900);
+  }
 
-	.controls {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		flex-wrap: wrap;
-		justify-content: flex-end;
-	}
+  /* Dropdown */
+  .dropdown {
+    position: relative;
+  }
 
-	.toggle {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-		font-size: 0.9rem;
-		opacity: 0.85;
-	}
+  .dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 50;
+    min-width: 140px;
+    padding: var(--space-xs);
+    background: var(--color-white);
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+  }
 
-	.select {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-		font-size: 0.9rem;
-		opacity: 0.85;
-	}
+  .dropdown:hover .dropdown-menu,
+  .dropdown:focus-within .dropdown-menu {
+    display: block;
+  }
 
-	.select select {
-		padding: 0.35rem 0.5rem;
-		border-radius: 10px;
-		border: 1px solid rgba(0, 0, 0, 0.15);
-		background: white;
-	}
+  .dropdown-item {
+    display: block;
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    text-align: left;
+    font-size: 0.8125rem;
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+  }
 
-	textarea {
-		box-sizing: border-box;
-		width: 100%;
-		height: var(--pane-height);
-		font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-			monospace;
-		padding: 0.75rem;
-		border-radius: 10px;
-		border: 1px solid rgba(0, 0, 0, 0.15);
-		resize: none;
-	}
+  .dropdown-item:hover {
+    background: var(--color-gray-100);
+  }
 
-	button {
-		padding: 0.55rem 0.9rem;
-		border: 0;
-		border-radius: 10px;
-		background: #111827;
-		color: white;
-		cursor: pointer;
-	}
+  .style-select {
+    padding: 0.375rem 0.5rem;
+    font-size: 0.8125rem;
+    background: var(--color-gray-50);
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
 
-	button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
+  /* ========================================
+	   Workspace
+	   ======================================== */
+  .workspace {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
 
-	.open {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 0.55rem 0.9rem;
-		border: 0;
-		border-radius: 10px;
-		background: #111827;
-		color: white;
-		text-decoration: none;
-		cursor: pointer;
-	}
+  .pane {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
 
-	.open.disabled {
-		pointer-events: none;
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
+  /* Editor Pane */
+  .editor-pane {
+    background: var(--editor-bg);
+    position: relative;
+  }
 
-	.pdf-toolbar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.75rem;
-		flex-wrap: wrap;
-	}
+  .editor {
+    flex: 1;
+    width: 100%;
+    padding: var(--space-lg);
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    line-height: 1.7;
+    color: var(--color-gray-200);
+    background: transparent;
+    border: none;
+    resize: none;
+    outline: none;
+  }
 
-	.pager,
-	.zoom {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
+  .editor::placeholder {
+    color: var(--color-gray-600);
+  }
 
-	.page {
-		width: 4.5rem;
-		padding: 0.35rem 0.5rem;
-		border-radius: 10px;
-		border: 1px solid rgba(0, 0, 0, 0.15);
-	}
+  .error-bar {
+    padding: var(--space-sm) var(--space-md);
+    font-size: 0.75rem;
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+    border-top: 1px solid rgba(239, 68, 68, 0.2);
+  }
 
-	.total,
-	.percent {
-		opacity: 0.75;
-		font-size: 0.9rem;
-	}
+  /* Preview Pane */
+  .preview-pane {
+    background: var(--preview-bg);
+  }
 
-	.pdf-body {
-		position: relative;
-		height: var(--pane-height);
-		overflow: hidden;
-		border: 1px solid rgba(0, 0, 0, 0.15);
-		border-radius: 10px;
-		background: rgba(0, 0, 0, 0.02);
-		padding: 0.75rem;
-		box-sizing: border-box;
-	}
+  .preview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-white);
+    border-bottom: 1px solid var(--color-gray-200);
+  }
 
-	.pdfjs-container {
-		position: absolute;
-		inset: 0;
-		overflow: auto;
-	}
+  .pager,
+  .zoom {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
 
-	.placeholder {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border: 1px dashed rgba(0, 0, 0, 0.2);
-		border-radius: 10px;
-		color: rgba(0, 0, 0, 0.55);
-		background: rgba(0, 0, 0, 0.02);
-		text-align: center;
-		padding: 1rem;
-	}
+  .pager button,
+  .zoom button {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: 0.75rem;
+    background: var(--color-gray-100);
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
 
-	.placeholder.overlay {
-		position: absolute;
-		inset: 0;
-		z-index: 2;
-		pointer-events: none;
-	}
+  .pager button:disabled,
+  .zoom button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 
-	.hint {
-		opacity: 0.7;
-		font-size: 0.9rem;
-	}
+  .page-info,
+  .zoom-level {
+    font-size: 0.75rem;
+    color: var(--color-gray-500);
+    font-family: var(--font-mono);
+  }
 
-	.error {
-		background: rgba(239, 68, 68, 0.08);
-		border: 1px solid rgba(239, 68, 68, 0.25);
-		padding: 0.75rem;
-		border-radius: 10px;
-		white-space: pre-wrap;
-	}
+  .preview-container {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+  }
 
-	.diag pre {
-		margin: 0.75rem 0 0;
-		white-space: pre-wrap;
-	}
+  .pdfjs-container {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    padding: var(--space-lg);
+  }
 
-	.typst pre {
-		margin: 0.75rem 0 0;
-		white-space: pre;
-		overflow: auto;
-		max-height: 40vh;
-	}
+  .preview-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--preview-bg);
+  }
+
+  /* PDF Viewer Overrides */
+  :global(.pdfViewer .page) {
+    margin: 0 auto var(--space-md);
+    box-shadow: var(--paper-shadow);
+  }
 </style>

@@ -18,6 +18,9 @@ import type {
 	PhrasingContent,
 	Root,
 	Strong,
+	Table,
+	TableCell,
+	TableRow,
 	Text,
 	Yaml
 } from 'mdast';
@@ -250,6 +253,8 @@ function renderBlock(
 			return renderBlockquote(node as Blockquote, indentLevel, definitions);
 		case 'thematicBreak':
 			return indentLines('#line(length: 100%, stroke: 0.6pt)', indentLevel);
+		case 'table':
+			return renderTable(node as Table, indentLevel, definitions);
 		default:
 			return null;
 	}
@@ -330,6 +335,57 @@ function maxBacktickRun(value: string): number {
 		run = 0;
 	}
 	return maxRun;
+}
+
+function renderTable(node: Table, indentLevel: number, definitions: Map<string, Definition>): string {
+	const rows = node.children as TableRow[];
+	if (rows.length === 0) return '';
+
+	// Get column count from first row
+	const headerRow = rows[0];
+	const colCount = headerRow.children.length;
+
+	// Get alignment from node.align
+	const alignMap: Record<string, string> = {
+		left: 'left',
+		right: 'right',
+		center: 'center'
+	};
+	const aligns = (node.align ?? []).map((a) => alignMap[a ?? 'left'] ?? 'left');
+
+	// Build column specification
+	const columns = Array(colCount).fill('auto').join(', ');
+
+	// Build table content
+	const cells: string[] = [];
+
+	// Header row (first row) - render as bold
+	for (const cell of headerRow.children as TableCell[]) {
+		const content = renderInlines(cell.children, definitions);
+		cells.push(`[*${content}*]`);
+	}
+
+	// Data rows
+	for (let i = 1; i < rows.length; i++) {
+		const row = rows[i];
+		for (const cell of row.children as TableCell[]) {
+			const content = renderInlines(cell.children, definitions);
+			cells.push(`[${content}]`);
+		}
+	}
+
+	// Build align argument
+	const alignArgs = aligns.slice(0, colCount).map((a) => a).join(', ');
+
+	const lines = [
+		`#table(`,
+		`  columns: (${columns}),`,
+		`  align: (${alignArgs}),`,
+		`  ${cells.join(', ')}`,
+		`)`
+	];
+
+	return indentLines(lines.join('\n'), indentLevel);
 }
 
 function renderBlockquote(node: Blockquote, indentLevel: number, definitions: Map<string, Definition>): string {
