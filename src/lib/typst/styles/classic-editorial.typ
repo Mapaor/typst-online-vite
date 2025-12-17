@@ -1,7 +1,7 @@
 // 方案二：经典阅读风 (The "Classic Editorial" Style)
 // 特点：正文衬线、标题无衬线对比、首行缩进、引用块左侧竖线。
 
-#let article(title: "", authors: (), body) = {
+#let article(title: "", authors: (), lang: "zh", body) = {
   set page(paper: "a4", margin: (x: 2.5cm, y: 2.5cm))
   set document(title: title, author: authors)
 
@@ -9,7 +9,7 @@
   set text(
     font: ("Libertinus Serif", "Noto Serif CJK SC", "SimSun"),
     size: 12pt,
-    lang: "zh",
+    lang: lang,
   )
 
   // 2) 段落：传统书籍排版

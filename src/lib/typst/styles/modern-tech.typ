@@ -1,7 +1,7 @@
 // 方案一：现代科技风 (The "Modern Tech" Style)
 // 特点：全无衬线（更像网页阅读）、段间距、无首行缩进、代码块现代风格。
 
-#let article(title: "", authors: (), body) = {
+#let article(title: "", authors: (), lang: "zh", body) = {
   // 1) 页面设置：宽边距，利于阅读
   set page(
     paper: "a4",
@@ -14,7 +14,7 @@
   set text(
     font: ("Inter", "Roboto", "Noto Sans CJK SC", "Microsoft YaHei"),
     size: 11pt,
-    lang: "zh",
+    lang: lang,
   )
 
   // 3) 段落：放弃首行缩进，采用“段间距”模式

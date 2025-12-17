@@ -583,14 +583,22 @@
 	}
 
 	.open {
-		font-size: 0.9rem;
-		color: #111827;
-		opacity: 0.8;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.55rem 0.9rem;
+		border: 0;
+		border-radius: 10px;
+		background: #111827;
+		color: white;
+		text-decoration: none;
+		cursor: pointer;
 	}
 
 	.open.disabled {
 		pointer-events: none;
-		opacity: 0.35;
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.pdf-toolbar {

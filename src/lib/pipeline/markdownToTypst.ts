@@ -26,6 +26,7 @@ export type MarkdownToTypstOptions = {
 	title?: string;
 	authors?: string[];
 	style?: TypstStyleId;
+	lang?: 'zh' | 'en';
 };
 
 export type TypstStyleId = 'modern-tech' | 'classic-editorial';
@@ -46,6 +47,7 @@ export function markdownToTypst(markdown: string, options: MarkdownToTypstOption
 
 	const title = options.title ?? frontmatter.title ?? leadingTitle ?? '';
 	const authors = options.authors ?? frontmatter.authors ?? [];
+	const lang = options.lang ?? coerceLanguage(frontmatter.lang) ?? 'zh';
 
 	const nodesForBody =
 		leadingTitleIndex !== null && normalizeText(title) === normalizeText(leadingTitle)
@@ -63,7 +65,8 @@ export function markdownToTypst(markdown: string, options: MarkdownToTypstOption
 	header.push(`#import "${template.path}": ${template.entry}`);
 	const showArgs = [
 		title ? `title: "${escapeTypstString(title)}"` : null,
-		authors.length ? `authors: ${renderTypstArray(authors.map((a) => `"${escapeTypstString(a)}"`))}` : null
+		authors.length ? `authors: ${renderTypstArray(authors.map((a) => `"${escapeTypstString(a)}"`))}` : null,
+		`lang: "${lang}"`
 	]
 		.filter(isNonEmpty)
 		.join(', ');
@@ -90,6 +93,7 @@ function collectDefinitions(root: Root): Map<string, Definition> {
 type Frontmatter = {
 	title?: string;
 	authors?: string[];
+	lang?: string;
 };
 
 function parseFrontmatter(root: Root): Frontmatter {
@@ -104,6 +108,12 @@ function parseFrontmatterYaml(yaml: string): Frontmatter {
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
+
+		const langMatch = /^\s*lang(?:uage)?\s*:\s*(.+?)\s*$/.exec(line);
+		if (langMatch && !result.lang) {
+			result.lang = stripYamlScalar(langMatch[1]);
+			continue;
+		}
 
 		const titleMatch = /^\s*title\s*:\s*(.+?)\s*$/.exec(line);
 		if (titleMatch && !result.title) {
@@ -161,6 +171,13 @@ function stripYamlScalar(value: string): string {
 		v = v.slice(1, -1);
 	}
 	return v.trim();
+}
+
+function coerceLanguage(value: string | undefined): 'zh' | 'en' | undefined {
+	const v = (value ?? '').trim().toLowerCase();
+	if (v.startsWith('zh')) return 'zh';
+	if (v.startsWith('en')) return 'en';
+	return undefined;
 }
 
 function findLeadingH1(
