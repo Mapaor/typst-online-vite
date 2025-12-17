@@ -2,6 +2,7 @@ type CompileRequest = {
 	type: 'compile';
 	id: string;
 	mainTypst: string;
+	images?: Record<string, Uint8Array<ArrayBuffer>>;
 };
 
 type CompileResponse =
@@ -56,9 +57,12 @@ export class TypstWorkerClient {
 		this.#pending.clear();
 	}
 
-	compilePdf(mainTypst: string): Promise<{ pdf: Uint8Array<ArrayBuffer>; diagnostics: string[] }> {
+	compilePdf(
+		mainTypst: string,
+		images: Record<string, Uint8Array<ArrayBuffer>> = {}
+	): Promise<{ pdf: Uint8Array<ArrayBuffer>; diagnostics: string[] }> {
 		const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now());
-		const request: CompileRequest = { type: 'compile', id, mainTypst };
+		const request: CompileRequest = { type: 'compile', id, mainTypst, images };
 
 		return new Promise((resolve, reject) => {
 			this.#pending.set(id, { resolve, reject });

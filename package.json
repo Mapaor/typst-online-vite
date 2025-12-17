@@ -25,10 +25,14 @@
 		"@myriaddreamin/typst.ts": "^0.6.1-rc5",
 		"@types/mdast": "^4.0.4",
 		"@types/unist": "^3.0.3",
+		"mermaid": "^11.12.2",
 		"pdfjs-dist": "^5.4.449",
 		"remark-frontmatter": "^5.0.0",
 		"remark-gfm": "^4.0.1",
+		"remark-mark": "^0.0.0",
+		"remark-math": "^6.0.0",
 		"remark-parse": "^11.0.0",
+		"remark-supersub": "^1.0.0",
 		"unified": "^11.0.5"
 	}
 }

@@ -9,6 +9,7 @@ type CompileRequest = {
 	type: 'compile';
 	id: string;
 	mainTypst: string;
+	images?: Record<string, Uint8Array<ArrayBuffer>>;
 };
 
 type CompileResponse =
@@ -71,9 +72,16 @@ function getCompiler(): Promise<TypstCompiler> {
 	return compilerPromise;
 }
 
-async function compilePdf(mainTypst: string): Promise<{ pdf: Uint8Array; diagnostics: string[] }> {
+async function compilePdf(
+	mainTypst: string,
+	images: Record<string, Uint8Array<ArrayBuffer>> = {}
+): Promise<{ pdf: Uint8Array; diagnostics: string[] }> {
 	const compiler = await getCompiler();
 	compiler.addSource('/main.typ', mainTypst);
+
+	for (const [path, data] of Object.entries(images)) {
+		compiler.mapShadow('/' + path, data);
+	}
 
 	const result = await compiler.compile({
 		mainFilePath: '/main.typ',
@@ -95,7 +103,7 @@ ctx.onmessage = (event: MessageEvent<CompileRequest>) => {
 
 	compileQueue = compileQueue.then(async () => {
 		try {
-			const { pdf, diagnostics } = await compilePdf(message.mainTypst);
+			const { pdf, diagnostics } = await compilePdf(message.mainTypst, message.images);
 			const pdfCopy = new Uint8Array(pdf.length);
 			pdfCopy.set(pdf);
 			ctx.postMessage(

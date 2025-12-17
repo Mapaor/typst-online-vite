@@ -6,6 +6,7 @@
   import { markdownToTypst } from '$lib/pipeline/markdownToTypst'
   import { TypstWorkerClient } from '$lib/workers/typstClient'
   import type { UILang } from '$lib/i18n/lang'
+  import { renderMermaidToSvg } from '$lib/mermaid/render'
 
   import 'pdfjs-dist/web/pdf_viewer.css'
 
@@ -54,6 +55,14 @@ date: ${new Date().toISOString().split('T')[0]}
 
 这是一段普通段落，包含 **加粗**、_斜体_、\`行内代码\`、以及一个 [内联链接](https://example.com)。
 
+### 扩展语法
+- [toc]
+- ~~删除文本~~
+- 上标^sup^ 下标~sub~
+- 脚注支持[^1]
+
+[^1]: 这是一个脚注示例。
+
 ### 嵌套列表
 
 - 产品特性
@@ -65,12 +74,25 @@ date: ${new Date().toISOString().split('T')[0]}
   3. PDF.js 预览
 
 ### 代码块
-
 \`\`\`typescript
-// 一切都在本地处理
-const markdown = editor.getValue();
 const pdf = await compile(markdown);
-download(pdf);
+\`\`\`
+
+### 数学公式
+
+行内公式：$ E = m c^2 $
+
+块级公式：
+$$
+a^2 + b^2 = c^2
+$$
+
+### 流程图 (Mermaid)
+
+\`\`\`mermaid
+graph LR;
+    Markdown-->Typst;
+    Typst-->PDF;
 \`\`\`
 
 > **提示**：你可以拖放 \`.md\` 文件到编辑器直接导入，或使用顶部的模板快速开始。
@@ -89,15 +111,14 @@ date: ${new Date().toISOString().split('T')[0]}
 
 ## Key Features
 
-| Feature | Description |
-| :--- | :--- |
-| **🛡️ Privacy First** | Powered by WASM, all processing happens locally in your browser. No data upload. |
-| **✨ Smart Cleanup** | Auto-fix AI-generated Markdown issues: table overflow, broken hierarchy, formatting errors |
-| **📄 Pro Typesetting** | Built-in professional fonts, business-ready documents, what you see is what you get |
-| **⚡ Zero Setup** | No installation, no login required. Just open and use. |
+|Feature|Description|
+|:---|:---|
+|**🛡️ Privacy First**|Powered by WASM, all processing happens locally in your browser. No data upload.|
+|**✨ Smart Cleanup**|Auto-fix AI-generated Markdown issues: table overflow, broken hierarchy, formatting errors|
+|**📄 Pro Typesetting**|Built-in professional fonts, business-ready documents, what you see is what you get|
+|**⚡ Zero Setup**|No installation, no login required. Just open and use.|
 
 ## Quick Start
-
 1. Paste your **ChatGPT / Claude** draft into the left editor
 2. Watch the right panel — formatting issues are auto-corrected
 3. Click **"Export PDF"** in the top-right corner to download
@@ -107,8 +128,15 @@ date: ${new Date().toISOString().split('T')[0]}
 ## Typesetting Demo
 
 ### Text Formatting
-
 This is a regular paragraph with **bold**, _italic_, \`inline code\`, and an [inline link](https://example.com).
+
+### Extended Syntax
+- [toc]
+- ~~Strikethrough~~
+- Super^sup^ Sub~sub~
+- Footnote[^Note]
+
+[^Note]: This is a footnote example.
 
 ### Nested Lists
 
@@ -121,12 +149,25 @@ This is a regular paragraph with **bold**, _italic_, \`inline code\`, and an [in
   3. PDF.js preview
 
 ### Code Block
-
 \`\`\`typescript
-// Everything is processed locally
-const markdown = editor.getValue();
 const pdf = await compile(markdown);
-download(pdf);
+\`\`\`
+
+### Math Formula
+
+Inline: $ E = m c^2 $
+
+Block:
+$$
+a^2 + b^2 = c^2
+$$
+
+### Diagram (Mermaid)
+
+\`\`\`mermaid
+graph LR;
+    Markdown-->Typst;
+    Typst-->PDF;
 \`\`\`
 
 > **Tip**: You can drag and drop \`.md\` files into the editor, or use the templates in the top bar to get started quickly.
@@ -430,10 +471,51 @@ date: ${new Date().toISOString().split('T')[0]}
     errorMessage = null
 
     try {
-      const mainTypst = markdownToTypst(md, { style: nextStyle, lang: docLang })
-      const { pdf } = await client.compilePdf(mainTypst)
+      // Pre-process Mermaid blocks
+      let processedMd = md
+      const images: Record<string, Uint8Array> = {}
+
+      const mermaidRegex = /```mermaid\n([\s\S]*?)\n```/g
+      const matches = [...md.matchAll(mermaidRegex)]
+
+      if (matches.length > 0) {
+        let lastIndex = 0
+        let newContent = ''
+
+        for (const [index, match] of matches.entries()) {
+          const [fullMatch, code] = match
+          const id = `mermaid-${index}`
+          const filename = `${id}.svg`
+
+          try {
+            const svg = await renderMermaidToSvg(code, id)
+            images[filename] = svg
+
+            newContent += md.slice(lastIndex, match.index)
+            newContent += `![Mermaid Diagram](${filename})`
+            lastIndex = (match.index || 0) + fullMatch.length
+          } catch (e) {
+            console.error('Mermaid render failed', e)
+            // Fallback to original code block on error? Or show error text
+            newContent += md.slice(
+              lastIndex,
+              (match.index || 0) + fullMatch.length,
+            )
+            lastIndex = (match.index || 0) + fullMatch.length
+          }
+        }
+        newContent += md.slice(lastIndex)
+        processedMd = newContent
+      }
+
+      const mainTypst = markdownToTypst(processedMd, {
+        style: nextStyle,
+        lang: docLang,
+      })
+      // @ts-ignore
+      const pdfData = await client.compilePdf(mainTypst, images)
       if (seq !== compileSeq) return
-      setPdfPreview(pdf)
+      setPdfPreview(pdfData.pdf)
       status = 'done'
     } catch (error) {
       if (seq !== compileSeq) return

@@ -1,19 +1,29 @@
 import { unified } from 'unified';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+// @ts-ignore
+import remarkMark from 'remark-mark';
+// @ts-ignore
+import remarkSupersub from 'remark-supersub';
 import remarkParse from 'remark-parse';
 import type {
 	Blockquote,
 	Code,
 	Content,
+	Delete,
 	Definition,
 	Emphasis,
+	FootnoteDefinition,
+	FootnoteReference,
 	Heading,
+	Image,
 	InlineCode,
 	Link,
 	LinkReference,
 	List,
 	ListItem,
+	Literal,
 	Paragraph,
 	PhrasingContent,
 	Root,
@@ -24,6 +34,29 @@ import type {
 	Text,
 	Yaml
 } from 'mdast';
+
+interface Mark extends Literal {
+	type: 'mark';
+	children: PhrasingContent[];
+}
+
+interface SuperScript extends Literal {
+	type: 'superscript';
+	children: PhrasingContent[];
+}
+
+interface SubScript extends Literal {
+	type: 'subscript';
+	children: PhrasingContent[];
+}
+
+interface MathNode extends Literal {
+	type: 'math';
+}
+
+interface InlineMathNode extends Literal {
+	type: 'inlineMath';
+}
 
 export type MarkdownToTypstOptions = {
 	title?: string;
@@ -40,8 +73,16 @@ const STYLE_TO_TEMPLATE: Record<TypstStyleId, { path: string; entry: string }> =
 };
 
 export function markdownToTypst(markdown: string, options: MarkdownToTypstOptions = {}): string {
-	const tree = unified().use(remarkParse).use(remarkFrontmatter, ['yaml']).use(remarkGfm).parse(markdown) as Root;
+	const tree = unified()
+		.use(remarkParse)
+		.use(remarkFrontmatter, ['yaml'])
+		.use(remarkGfm)
+		.use(remarkMath)
+		//.use(remarkMark)
+		.use(remarkSupersub)
+		.parse(markdown) as Root;
 	const definitions = collectDefinitions(tree);
+	const footnoteDefinitions = collectFootnotes(tree);
 	const frontmatter = parseFrontmatter(tree);
 	const { title: leadingTitle, index: leadingTitleIndex } = findLeadingH1(tree, definitions) ?? {
 		title: null,
@@ -58,7 +99,7 @@ export function markdownToTypst(markdown: string, options: MarkdownToTypstOption
 			: tree.children;
 
 	const body = nodesForBody
-		.map((node) => renderBlock(node, 0, definitions))
+		.map((node) => renderBlock(node, 0, definitions, footnoteDefinitions))
 		.filter(isNonEmpty)
 		.join('\n\n');
 
@@ -88,6 +129,16 @@ function collectDefinitions(root: Root): Map<string, Definition> {
 	for (const node of root.children) {
 		if (node.type !== 'definition') continue;
 		const def = node as Definition;
+		definitions.set(def.identifier.toLowerCase(), def);
+	}
+	return definitions;
+}
+
+function collectFootnotes(root: Root): Map<string, FootnoteDefinition> {
+	const definitions = new Map<string, FootnoteDefinition>();
+	for (const node of root.children) {
+		if (node.type !== 'footnoteDefinition') continue;
+		const def = node as FootnoteDefinition;
 		definitions.set(def.identifier.toLowerCase(), def);
 	}
 	return definitions;
@@ -235,44 +286,78 @@ function normalizeText(value: string | null): string {
 function renderBlock(
 	node: Content,
 	indentLevel: number,
-	definitions: Map<string, Definition>
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
 ): string | null {
 	switch (node.type) {
 		case 'yaml':
 		case 'definition':
+		case 'footnoteDefinition':
 			return null;
 		case 'heading':
-			return renderHeading(node as Heading, indentLevel, definitions);
+			return renderHeading(node as Heading, indentLevel, definitions, footnoteDefinitions);
 		case 'paragraph':
-			return indentLines(renderParagraph(node as Paragraph, definitions), indentLevel);
+			return indentLines(
+				renderParagraph(node as Paragraph, definitions, footnoteDefinitions),
+				indentLevel
+			);
 		case 'list':
-			return renderList(node as List, indentLevel, definitions);
+			return renderList(node as List, indentLevel, definitions, footnoteDefinitions);
 		case 'code':
 			return renderCodeBlock(node as Code, indentLevel);
 		case 'blockquote':
-			return renderBlockquote(node as Blockquote, indentLevel, definitions);
+			return renderBlockquote(node as Blockquote, indentLevel, definitions, footnoteDefinitions);
 		case 'thematicBreak':
 			return indentLines('#line(length: 100%, stroke: 0.6pt)', indentLevel);
 		case 'table':
-			return renderTable(node as Table, indentLevel, definitions);
+			return renderTable(node as Table, indentLevel, definitions, footnoteDefinitions);
+		case 'math':
+			return renderMathBlock(node as MathNode, indentLevel);
 		default:
 			return null;
 	}
 }
 
-function renderHeading(node: Heading, indentLevel: number, definitions: Map<string, Definition>): string {
+function renderMathBlock(node: MathNode, indentLevel: number): string {
+	// Block math in Typst uses spaces: $ block $
+	return indentLines(`$ ${node.value.trim()} $`, indentLevel);
+}
+
+function renderHeading(
+	node: Heading,
+	indentLevel: number,
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
+): string {
 	const level = Math.min(Math.max(node.depth, 1), 6);
-	return indentLines(`${'='.repeat(level)} ${renderInlines(node.children, definitions)}`, indentLevel);
+	return indentLines(
+		`${'='.repeat(level)} ${renderInlines(node.children, definitions, footnoteDefinitions)}`,
+		indentLevel
+	);
 }
 
-function renderParagraph(node: Paragraph, definitions: Map<string, Definition>): string {
-	return renderInlines(node.children, definitions);
+function renderParagraph(
+	node: Paragraph,
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
+): string {
+	// Check for [toc]
+	const text = plainTextFromPhrasing(node.children, definitions).trim().toLowerCase();
+	if (text === '[toc]') {
+		return `#outline(title: auto, indent: auto)`;
+	}
+	return renderInlines(node.children, definitions, footnoteDefinitions);
 }
 
-function renderList(node: List, indentLevel: number, definitions: Map<string, Definition>): string {
+function renderList(
+	node: List,
+	indentLevel: number,
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
+): string {
 	const marker = node.ordered ? '+' : '-';
 	return node.children
-		.map((item) => renderListItem(item, marker, indentLevel, definitions))
+		.map((item) => renderListItem(item, marker, indentLevel, definitions, footnoteDefinitions))
 		.filter(isNonEmpty)
 		.join('\n');
 }
@@ -281,7 +366,8 @@ function renderListItem(
 	node: ListItem,
 	marker: string,
 	indentLevel: number,
-	definitions: Map<string, Definition>
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
 ): string {
 	const baseIndent = '  '.repeat(indentLevel);
 	const nestedIndentLevel = indentLevel + 1;
@@ -290,13 +376,15 @@ function renderListItem(
 	const lines: string[] = [];
 
 	if (first?.type === 'paragraph') {
-		lines.push(`${baseIndent}${marker} ${renderParagraph(first as Paragraph, definitions)}`);
+		lines.push(
+			`${baseIndent}${marker} ${renderParagraph(first as Paragraph, definitions, footnoteDefinitions)}`
+		);
 		for (const child of node.children.slice(1)) {
 			if (child.type === 'list') {
-				lines.push(renderList(child as List, nestedIndentLevel, definitions));
+				lines.push(renderList(child as List, nestedIndentLevel, definitions, footnoteDefinitions));
 				continue;
 			}
-			const rendered = renderBlock(child as Content, nestedIndentLevel, definitions);
+			const rendered = renderBlock(child as Content, nestedIndentLevel, definitions, footnoteDefinitions);
 			if (rendered) lines.push(rendered);
 		}
 		return lines.join('\n');
@@ -305,10 +393,10 @@ function renderListItem(
 	lines.push(`${baseIndent}${marker}`);
 	for (const child of node.children) {
 		if (child.type === 'list') {
-			lines.push(renderList(child as List, nestedIndentLevel, definitions));
+			lines.push(renderList(child as List, nestedIndentLevel, definitions, footnoteDefinitions));
 			continue;
 		}
-		const rendered = renderBlock(child as Content, nestedIndentLevel, definitions);
+		const rendered = renderBlock(child as Content, nestedIndentLevel, definitions, footnoteDefinitions);
 		if (rendered) lines.push(rendered);
 	}
 	return lines.join('\n');
@@ -337,7 +425,12 @@ function maxBacktickRun(value: string): number {
 	return maxRun;
 }
 
-function renderTable(node: Table, indentLevel: number, definitions: Map<string, Definition>): string {
+function renderTable(
+	node: Table,
+	indentLevel: number,
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
+): string {
 	const rows = node.children as TableRow[];
 	if (rows.length === 0) return '';
 
@@ -361,7 +454,7 @@ function renderTable(node: Table, indentLevel: number, definitions: Map<string, 
 
 	// Header row (first row) - render as bold
 	for (const cell of headerRow.children as TableCell[]) {
-		const content = renderInlines(cell.children, definitions);
+		const content = renderInlines(cell.children, definitions, footnoteDefinitions);
 		cells.push(`[*${content}*]`);
 	}
 
@@ -369,7 +462,7 @@ function renderTable(node: Table, indentLevel: number, definitions: Map<string, 
 	for (let i = 1; i < rows.length; i++) {
 		const row = rows[i];
 		for (const cell of row.children as TableCell[]) {
-			const content = renderInlines(cell.children, definitions);
+			const content = renderInlines(cell.children, definitions, footnoteDefinitions);
 			cells.push(`[${content}]`);
 		}
 	}
@@ -388,9 +481,14 @@ function renderTable(node: Table, indentLevel: number, definitions: Map<string, 
 	return indentLines(lines.join('\n'), indentLevel);
 }
 
-function renderBlockquote(node: Blockquote, indentLevel: number, definitions: Map<string, Definition>): string {
+function renderBlockquote(
+	node: Blockquote,
+	indentLevel: number,
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
+): string {
 	const body = node.children
-		.map((child) => renderBlock(child, 0, definitions))
+		.map((child) => renderBlock(child, 0, definitions, footnoteDefinitions))
 		.filter(isNonEmpty)
 		.join('\n\n');
 
@@ -400,24 +498,58 @@ function renderBlockquote(node: Blockquote, indentLevel: number, definitions: Ma
 	return [open, indentLines(body, indentLevel + 1), indentLines(']', indentLevel)].join('\n');
 }
 
-function renderInlines(nodes: PhrasingContent[], definitions: Map<string, Definition>): string {
-	return nodes.map((node) => renderInline(node, definitions)).filter(isNonEmpty).join('');
+function renderInlines(
+	nodes: PhrasingContent[],
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
+): string {
+	return nodes
+		.map((node) => renderInline(node, definitions, footnoteDefinitions))
+		.filter(isNonEmpty)
+		.join('');
 }
 
-function renderInline(node: PhrasingContent, definitions: Map<string, Definition>): string | null {
-	switch (node.type) {
+function renderInline(
+	node: PhrasingContent,
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
+): string | null {
+	switch ((node as any).type) {
 		case 'text':
 			return escapeTypstText((node as Text).value);
 		case 'strong':
-			return `*${renderInlines((node as Strong).children, definitions)}*`;
+			return `*${renderInlines((node as Strong).children, definitions, footnoteDefinitions)}*`;
 		case 'emphasis':
-			return `_${renderInlines((node as Emphasis).children, definitions)}_`;
+			return `_${renderInlines((node as Emphasis).children, definitions, footnoteDefinitions)}_`;
+		case 'delete':
+			return `#strike[${renderInlines((node as unknown as Delete).children, definitions, footnoteDefinitions)}]`;
+		case 'mark':
+			return `#highlight[${renderInlines((node as unknown as Mark).children, definitions, footnoteDefinitions)}]`;
+		case 'subscript':
+			return `#sub[${renderInlines((node as unknown as SubScript).children, definitions, footnoteDefinitions)}]`;
+		case 'superscript':
+			return `#super[${renderInlines((node as unknown as SuperScript).children, definitions, footnoteDefinitions)}]`;
+		case 'footnoteReference': {
+			const ref = node as FootnoteReference;
+			const def = footnoteDefinitions.get(ref.identifier.toLowerCase());
+			if (!def) return ''; // Or render failure?
+			// Render footnote content inline
+			const content = def.children
+				.map((child) => renderBlock(child, 0, definitions, footnoteDefinitions))
+				.filter(isNonEmpty)
+				.join(' '); // Join blocks with space for inline footnote
+			return `#footnote[${content.trim()}]`;
+		}
 		case 'inlineCode':
 			return renderInlineCode(node as InlineCode);
+		case 'inlineMath':
+			return `$${(node as InlineMathNode).value.trim()}$`;
+		case 'image':
+			return renderImage(node as Image);
 		case 'link':
-			return renderLink(node as Link, definitions);
+			return renderLink(node as Link, definitions, footnoteDefinitions);
 		case 'linkReference':
-			return renderLinkReference(node as LinkReference, definitions);
+			return renderLinkReference(node as LinkReference, definitions, footnoteDefinitions);
 		case 'break':
 			return '\\\n';
 		default:
@@ -430,16 +562,31 @@ function renderInlineCode(node: InlineCode): string {
 	return `\`${value}\``;
 }
 
-function renderLink(node: Link, definitions: Map<string, Definition>): string {
+function renderImage(node: Image): string {
+	// Basic image support. 
+	// If alt text exists, we could use it for accessibility or caption, but Typst #image doesn't strictly require it.
+	// We'll just output the image function.
+	return `#image("${escapeTypstString(node.url)}")`;
+}
+
+function renderLink(
+	node: Link,
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
+): string {
 	const url = escapeTypstString(node.url);
-	const label = renderInlines(node.children, definitions);
+	const label = renderInlines(node.children, definitions, footnoteDefinitions);
 	if (!label.trim()) return `#link("${url}")[${escapeTypstText(node.url)}]`;
 	return `#link("${url}")[${label}]`;
 }
 
-function renderLinkReference(node: LinkReference, definitions: Map<string, Definition>): string | null {
+function renderLinkReference(
+	node: LinkReference,
+	definitions: Map<string, Definition>,
+	footnoteDefinitions: Map<string, FootnoteDefinition>
+): string | null {
 	const def = definitions.get(node.identifier.toLowerCase());
-	const label = renderInlines(node.children, definitions);
+	const label = renderInlines(node.children, definitions, footnoteDefinitions);
 	if (!def) return label || escapeTypstText(node.label || node.identifier);
 	const url = escapeTypstString(def.url);
 	if (!label.trim()) return `#link("${url}")[${escapeTypstText(def.url)}]`;
