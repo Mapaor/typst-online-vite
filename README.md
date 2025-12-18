@@ -1,48 +1,67 @@
-# mdxport
+<p align="center">
+  <img src="static/logo.png" alt="MDXport Logo" width="128" />
+</p>
 
-一个基于 Svelte 和 Typst 的 Markdown 导出工具，支持导出为高质量 PDF。
+# MDXport
 
-## 特性
+**Markdown to PDF, Perfect Typesetting.**
 
-- **Typst 驱动**: 利用 Typst 强大的排版能力生成 PDF。
-- **即时预览**: 编辑 Markdown 实时预览 PDF 效果。
-- **Mermaid 支持**: 集成 Mermaid 图表渲染。
-- **MathJax/Katex 支持**: 完美的数学公式支持。
-- **浏览器及离线运行**: 所有的转换都在浏览器中完成，无需后端。
+MDXport is a powerful Markdown export tool built with [Svelte](https://svelte.dev/) and [Typst](https://typst.app/). It allows you to convert Markdown into high-quality, business-ready PDFs directly in your browser.
 
-## Creating a project
+## ✨ Features
 
-If you're seeing this, you've probably already done this step. Congrats!
+- **Typst-Powered**: Leverages the power of Typst for professional-grade typesetting.
+- **Privacy-First**: Runs entirely client-side using WebAssembly. Your data never leaves your browser.
+- **Real-time Preview**: Live side-by-side preview of your Markdown and the rendered PDF.
+- **Smart Formatting**: Automatically fixes common AI-generated Markdown issues like table overflows and hierarchy errors.
+- **Rich Syntax Support**:
+  - 📊 **Mermaid** diagrams
+  - 📐 **Math** formulas (LaTeX syntax)
+  - 💻 **Syntax Highlighting** for code blocks
+  - 📑 **Auto-generated Table of Contents**
+- **No Setup**: No installation or account required. Just open and use.
 
-```sh
-# create a new project in the current directory
-npx sv create
+## 🚀 Quick Start
 
-# create a new project in my-app
-npx sv create my-app
-```
+Visit [mdxport.com](https://mdxport.com) to start using it immediately.
 
-## Developing
+### Local Development
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+If you want to run MDXport locally:
 
-```sh
-npm run dev
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/cosformula/mdxport.git
+   cd mdxport
+   ```
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
 
-## Building
+3. **Start the development server**
+   ```bash
+   npm run dev
+   ```
 
-To create a production version of your app:
+4. **Build for production**
+   ```bash
+   npm run build
+   ```
 
-```sh
-npm run build
-```
+## 🛠️ Tech Stack
 
-You can preview the production build with `npm run preview`.
+- **Framework**: [Svelte 5](https://svelte.dev/)
+- **Typesetting**: [Typst](https://typst.app/) via WASM
+- **Markdown Handling**: [unified](https://unifiedjs.com/) ecosystem (remark)
+- **PDF Preview**: [PDF.js](https://mozilla.github.io/pdf.js/)
+- **Icons**: [Lucide](https://lucide.dev/) (via SVG)
 
-## License
+## 📄 License
 
-MIT [LICENSE](LICENSE)
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+[中文说明 (Chinese README)](README_zh.md)
