@@ -16,6 +16,15 @@
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
 
+  import type { FileNode } from '$lib/types/files'
+  import SidebarItem from '$lib/components/SidebarItem.svelte'
+  import {
+    getFileSystem,
+    saveFileSystem,
+    getOldFileSystemFromLS,
+    clearOldLSData,
+  } from '$lib/storage'
+
   import 'pdfjs-dist/web/pdf_viewer.css'
 
   import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
@@ -58,13 +67,13 @@ MDXport 旨在提供稳定的分页、尝试自动修复常见的格式错误并
 - **确定性构建**：相同的输入 + 锁定的模板/引擎版本 = 每次都是完全相同的 PDF。
 - **本地优先安全**：您的商业机密永远不会离开您的设备。
 
-[ 立即尝试 → ](https://mdxport.com) &nbsp; [ 查看项目 · GitHub ](https://github.com/cosformula/mdxport)
+[ 立即尝试 → ](https://mdxport.com) &nbsp; [ 查看工作区 · GitHub ](https://github.com/cosformula/mdxport)
 
 *由 WASM 驱动。可验证、可重现。*
 
 ---
 
-### 3 个核心 Feature 卡片
+### 核心特性
 
 #### 1. 拯救导出的预检 (Active Preflight & Verification)
 AI 生成的 Markdown 通常在“视觉上没问题”但“结构上不完整”。MDXport 充当预检工具：它尝试在导出前检测不匹配的定界符或错误嵌套、提示溢出的代码块，并正确处理常见的 LaTeX 数学语法。
@@ -153,7 +162,7 @@ MDXport aims for stable pagination, attempts to catch common formatting errors, 
 - **Reproducible Output**: Same input + Pinned template/engine versions = Same PDF.
 - **Local-First Security**: Your commercial specs never leave your device.
 
-[ Try in the browser → ](https://mdxport.com) &nbsp; [ View Project · GitHub ](https://github.com/cosformula/mdxport)
+[ Try in the browser → ](https://mdxport.com) &nbsp; [ View Workspace · GitHub ](https://github.com/cosformula/mdxport)
 
 *Powered by WASM. Deterministic & reproducible.*
 
@@ -238,11 +247,17 @@ graph LR;
   }
 
   const TEMPLATES = {
-    zh: {
-      empty: { name: '空白文档', content: '' },
-      welcome: { name: '快速入门', content: WELCOME_MARKDOWN.zh },
-      techDoc: {
+    zh: [
+      {
+        id: 'welcome',
+        name: '快速入门',
+        content: WELCOME_MARKDOWN.zh,
+        icon: '🚀',
+      },
+      {
+        id: 'techDoc',
         name: '技术方案',
+        icon: '📝',
         content: `---
 title: 技术方案文档
 date: ${new Date().toISOString().split('T')[0]}
@@ -260,8 +275,10 @@ date: ${new Date().toISOString().split('T')[0]}
 ## Summary
 `,
       },
-      weeklyReport: {
-        name: 'Weekly Report',
+      {
+        id: 'weeklyReport',
+        name: '工作周报',
+        icon: '📊',
         content: `# Weekly Report - ${new Date().toISOString().split('T')[0]}
 
 ## Completed
@@ -279,7 +296,46 @@ date: ${new Date().toISOString().split('T')[0]}
 ## Notes
 `,
       },
-    },
+    ],
+    en: [
+      {
+        id: 'welcome',
+        name: 'Get Started',
+        content: WELCOME_MARKDOWN.en,
+        icon: '🚀',
+      },
+      {
+        id: 'techDoc',
+        name: 'Technical Spec',
+        icon: '📝',
+        content: `---
+title: Technical Design Document
+date: ${new Date().toISOString().split('T')[0]}
+---
+
+# Overview
+
+## Context
+
+## Proposed Solution
+
+## Rollout Plan
+`,
+      },
+      {
+        id: 'weeklyReport',
+        name: 'Weekly Report',
+        icon: '📊',
+        content: `# Weekly Report - ${new Date().toISOString().split('T')[0]}
+
+## Accomplishments
+
+## Plans for Next Week
+
+## Blockers
+`,
+      },
+    ],
   }
 
   const SEO_LINKS = [
@@ -326,9 +382,410 @@ date: ${new Date().toISOString().split('T')[0]}
   })
 
   let leftPaneWidth = $state(50)
+  let sidebarWidth = $state(200) // pixels
   let isResizing = $state(false)
+  let isResizingSidebar = $state(false)
   let isDragging = $state(false)
   let style = $state('modern-tech') as 'modern-tech' | 'classic-editorial'
+  let activeFileId = $state<string | null>(null)
+
+  // File System State
+  let fileSystem = $state<FileNode[]>([])
+
+  // Initialize File System
+  onMount(async () => {
+    if (!browser) return
+
+    // 1. Try IndexedDB
+    const saved = await getFileSystem()
+    if (saved) {
+      fileSystem = saved
+      await syncOfficialTemplates()
+    } else {
+      // 2. Try Migration from LocalStorage
+      const oldData = getOldFileSystemFromLS()
+      if (oldData) {
+        fileSystem = oldData
+        await syncOfficialTemplates()
+        await saveFileSystem($state.snapshot(fileSystem))
+        clearOldLSData()
+      } else {
+        // 3. Fresh Seed
+        seedFileSystem()
+        // Auto-select based on current lang
+        const defaultId = lang === 'zh' ? 'welcome-zh' : 'welcome-en'
+        activeFileId = defaultId
+        const node = findNodeById(fileSystem, defaultId)
+        if (node) markdown = node.content || ''
+        await saveFileSystem($state.snapshot(fileSystem))
+      }
+    }
+  })
+
+  async function syncOfficialTemplates() {
+    let presetsRoot = fileSystem.find((n) => n.id === 'presets-root')
+    if (!presetsRoot) {
+      presetsRoot = {
+        id: 'presets-root',
+        name: lang === 'zh' ? '官方预设' : 'Official Presets',
+        type: 'folder',
+        isSystem: true,
+        isOpen: true,
+        children: [],
+      }
+      fileSystem.unshift(presetsRoot)
+    }
+    presetsRoot.isSystem = true
+
+    let workspaceRoot = fileSystem.find((n) => n.id === 'workspace-root')
+    if (!workspaceRoot) {
+      workspaceRoot = {
+        id: 'workspace-root',
+        name: lang === 'zh' ? '我的空间' : 'My Workspace',
+        type: 'folder',
+        isOpen: true,
+        children: [],
+      }
+      fileSystem.push(workspaceRoot)
+    }
+
+    // Migration: Move existing root-zh/root-en under presetsRoot if they exist at top level
+    const oldRoots = fileSystem.filter(
+      (n) => n.id === 'root-zh' || n.id === 'root-en',
+    )
+    oldRoots.forEach((root) => {
+      const index = fileSystem.indexOf(root)
+      if (index !== -1) {
+        fileSystem.splice(index, 1)
+        presetsRoot?.children?.push(root)
+      }
+    })
+
+    // Sub-migration: Move any non-system items from presetsRoot into workspaceRoot
+    if (presetsRoot.children && workspaceRoot.children) {
+      const userItemsFromPresets = presetsRoot.children.filter(
+        (n) => !n.isSystem,
+      )
+      userItemsFromPresets.forEach((item) => {
+        const index = presetsRoot?.children?.indexOf(item)
+        if (index !== undefined && index !== -1) {
+          presetsRoot?.children?.splice(index, 1)
+          workspaceRoot?.children?.push(item)
+        }
+      })
+    }
+
+    // Sync ZH under Presets
+    let zhRoot = presetsRoot.children?.find((n) => n.id === 'root-zh')
+    if (!zhRoot && presetsRoot.children) {
+      zhRoot = {
+        id: 'root-zh',
+        name: lang === 'zh' ? '中文示例' : 'ZH (Samples)',
+        type: 'folder',
+        isSystem: true,
+        children: [],
+      }
+      presetsRoot.children.push(zhRoot)
+    }
+    if (zhRoot) {
+      zhRoot.isSystem = true
+      if (zhRoot.children) {
+        const zhLib = zhRoot.children.find((n) => n.id === 'templates-zh')
+        if (zhLib) {
+          zhLib.isSystem = true
+          TEMPLATES.zh.forEach((t) => {
+            if (t.id === 'welcome') return
+            const existing = zhLib.children?.find(
+              (c) => c.id === `zh-template-${t.id}`,
+            )
+            if (existing) {
+              existing.isSystem = true
+            } else {
+              zhLib.children?.push({
+                id: `zh-template-${t.id}`,
+                name: `${t.name}.md`,
+                type: 'file',
+                isSystem: true,
+                content: t.content,
+              })
+            }
+          })
+        }
+        const zhWelcome = zhRoot.children.find((n) => n.id === 'welcome-zh')
+        if (zhWelcome) zhWelcome.isSystem = true
+      }
+    }
+
+    // Sync EN under Presets
+    let enRoot = presetsRoot.children?.find((n) => n.id === 'root-en')
+    if (!enRoot && presetsRoot.children) {
+      enRoot = {
+        id: 'root-en',
+        name: lang === 'zh' ? '英文示例' : 'EN (Samples)',
+        type: 'folder',
+        isSystem: true,
+        children: [],
+      }
+      presetsRoot.children.push(enRoot)
+    }
+    if (enRoot) {
+      enRoot.isSystem = true
+      if (enRoot.children) {
+        const enLib = enRoot.children.find((n) => n.id === 'templates-en')
+        if (enLib) {
+          enLib.isSystem = true
+          TEMPLATES.en.forEach((t) => {
+            if (t.id === 'welcome') return
+            const existing = enLib.children?.find(
+              (c) => c.id === `en-template-${t.id}`,
+            )
+            if (existing) {
+              existing.isSystem = true
+            } else {
+              enLib.children?.push({
+                id: `en-template-${t.id}`,
+                name: `${t.name}.md`,
+                type: 'file',
+                isSystem: true,
+                content: t.content,
+              })
+            }
+          })
+        }
+        const enWelcome = enRoot.children.find((n) => n.id === 'welcome-en')
+        if (enWelcome) enWelcome.isSystem = true
+      }
+    }
+    await saveFileSystem($state.snapshot(fileSystem))
+  }
+
+  // Auto-save to IndexedDB (Debounced)
+  let saveTimer: number | null = null
+  $effect(() => {
+    if (fileSystem.length > 0) {
+      // Trigger tracking for deep changes
+      JSON.stringify(fileSystem)
+
+      if (saveTimer) window.clearTimeout(saveTimer)
+      saveTimer = window.setTimeout(async () => {
+        await saveFileSystem($state.snapshot(fileSystem))
+      }, 1000)
+    }
+  })
+
+  function seedFileSystem() {
+    fileSystem = [
+      {
+        id: 'presets-root',
+        name: lang === 'zh' ? '官方预设' : 'Official Presets',
+        type: 'folder',
+        isSystem: true,
+        isOpen: true,
+        children: [
+          {
+            id: 'root-zh',
+            name: lang === 'zh' ? '中文示例' : 'ZH (Samples)',
+            type: 'folder',
+            isSystem: true,
+            isOpen: lang === 'zh',
+            children: [
+              {
+                id: 'welcome-zh',
+                name: '快速入门.md',
+                type: 'file',
+                isSystem: true,
+                content: WELCOME_MARKDOWN.zh,
+              },
+              {
+                id: 'templates-zh',
+                name: '模版库',
+                type: 'folder',
+                isSystem: true,
+                isOpen: false,
+                children: TEMPLATES.zh
+                  .filter((t) => t.id !== 'welcome')
+                  .map((t) => ({
+                    id: `zh-template-${t.id}`,
+                    name: `${t.name}.md`,
+                    type: 'file',
+                    isSystem: true,
+                    content: t.content,
+                  })),
+              },
+            ],
+          },
+          {
+            id: 'root-en',
+            name: lang === 'zh' ? '英文示例' : 'EN (Samples)',
+            type: 'folder',
+            isSystem: true,
+            isOpen: lang === 'en',
+            children: [
+              {
+                id: 'welcome-en',
+                name: 'Getting Started.md',
+                type: 'file',
+                isSystem: true,
+                content: WELCOME_MARKDOWN.en,
+              },
+              {
+                id: 'templates-en',
+                name: 'Templates',
+                type: 'folder',
+                isSystem: true,
+                isOpen: false,
+                children: TEMPLATES.en
+                  .filter((t) => t.id !== 'welcome')
+                  .map((t) => ({
+                    id: `en-template-${t.id}`,
+                    name: `${t.name}.md`,
+                    type: 'file',
+                    isSystem: true,
+                    content: t.content,
+                  })),
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'workspace-root',
+        name: lang === 'zh' ? '我的空间' : 'My Workspace',
+        type: 'folder',
+        isOpen: true,
+        children: [],
+      },
+    ]
+  }
+
+  // Reactive Root Naming
+  $effect(() => {
+    if (!browser) return
+    const currentLang = lang
+    const presetsRoot = fileSystem.find((n) => n.id === 'presets-root')
+    if (presetsRoot) {
+      presetsRoot.name = currentLang === 'zh' ? '官方预设' : 'Official Presets'
+      const zhRoot = presetsRoot.children?.find((n) => n.id === 'root-zh')
+      if (zhRoot) {
+        zhRoot.name = currentLang === 'zh' ? '中文示例' : 'ZH (Samples)'
+      }
+      const enRoot = presetsRoot.children?.find((n) => n.id === 'root-en')
+      if (enRoot) {
+        enRoot.name = currentLang === 'zh' ? '英文示例' : 'EN (Samples)'
+      }
+    }
+    const workspaceRoot = fileSystem.find((n) => n.id === 'workspace-root')
+    if (workspaceRoot) {
+      workspaceRoot.name = currentLang === 'zh' ? '我的空间' : 'My Workspace'
+    }
+  })
+
+  // File Operations
+  function findNodeById(nodes: FileNode[], id: string): FileNode | null {
+    for (const node of nodes) {
+      if (node.id === id) return node
+      if (node.children) {
+        const found = findNodeById(node.children, id)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
+  function handleSelectFile(node: FileNode) {
+    if (node.type === 'file') {
+      // Save current file content first
+      if (activeFileId) {
+        const currentFile = findNodeById(fileSystem, activeFileId)
+        if (currentFile) currentFile.content = markdown
+      }
+
+      activeFileId = node.id
+      markdown = node.content || ''
+      status = 'compiling'
+    }
+  }
+
+  // Update current file content in state as we type
+  $effect(() => {
+    if (activeFileId) {
+      const currentFile = findNodeById(fileSystem, activeFileId)
+      if (currentFile && currentFile.content !== markdown) {
+        currentFile.content = markdown
+      }
+    }
+  })
+
+  function handleToggleFolder(node: FileNode) {
+    node.isOpen = !node.isOpen
+  }
+
+  function handleCreateFile(parentNode: FileNode | null) {
+    const newNode: FileNode = {
+      id: crypto.randomUUID(),
+      name: 'New File.md',
+      type: 'file',
+      content: '',
+    }
+    if (parentNode) {
+      if (!parentNode.children) parentNode.children = []
+      parentNode.children.push(newNode)
+      parentNode.isOpen = true
+    } else {
+      fileSystem.push(newNode)
+    }
+    handleSelectFile(newNode)
+  }
+
+  function handleCreateFolder(parentNode: FileNode | null) {
+    const newNode: FileNode = {
+      id: crypto.randomUUID(),
+      name: 'New Folder',
+      type: 'folder',
+      isOpen: true,
+      children: [],
+    }
+    if (parentNode) {
+      if (!parentNode.children) parentNode.children = []
+      parentNode.children.push(newNode)
+      parentNode.isOpen = true
+    } else {
+      fileSystem.push(newNode)
+    }
+  }
+
+  function handleDeleteNode(nodeToDelete: FileNode) {
+    if (
+      !confirm(
+        lang === 'zh'
+          ? `确认删除 "${nodeToDelete.name}" 吗？`
+          : `Delete "${nodeToDelete.name}"?`,
+      )
+    )
+      return
+
+    function removeRecursive(nodes: FileNode[]) {
+      const index = nodes.indexOf(nodeToDelete)
+      if (index !== -1) {
+        nodes.splice(index, 1)
+        return true
+      }
+      for (const node of nodes) {
+        if (node.children && removeRecursive(node.children)) return true
+      }
+      return false
+    }
+
+    removeRecursive(fileSystem)
+    if (activeFileId === nodeToDelete.id) {
+      activeFileId = null
+      markdown = ''
+    }
+  }
+
+  function handleRenameNode(node: FileNode, newName: string) {
+    node.name = newName
+  }
 
   // Mobile State
   let activeMobileTab = $state<'editor' | 'preview'>('editor')
@@ -772,17 +1229,35 @@ date: ${new Date().toISOString().split('T')[0]}
 
   function onFileSelected(e: Event) {
     const target = e.target as HTMLInputElement
-    const file = target.files?.[0]
-    if (!file) return
+    const files = target.files
+    if (!files || files.length === 0) return
 
-    const reader = new FileReader()
-    reader.onload = (evt) => {
-      const content = evt.target?.result
-      if (typeof content === 'string') {
-        markdown = content
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = (evt) => {
+        const content = evt.target?.result
+        if (typeof content === 'string') {
+          const newNode: FileNode = {
+            id: crypto.randomUUID(),
+            name: file.name,
+            type: 'file',
+            content,
+          }
+          const workspaceRoot = fileSystem.find(
+            (n) => n.id === 'workspace-root',
+          )
+          if (workspaceRoot && workspaceRoot.children) {
+            workspaceRoot.children.push(newNode)
+            workspaceRoot.isOpen = true
+          } else {
+            fileSystem.push(newNode)
+          }
+          handleSelectFile(newNode)
+        }
       }
-    }
-    reader.readAsText(file)
+      reader.readAsText(file)
+    })
+
     // Reset value so same file can be selected again
     target.value = ''
   }
@@ -814,19 +1289,35 @@ date: ${new Date().toISOString().split('T')[0]}
     document.addEventListener('mouseup', stopResize)
   }
 
+  function startResizeSidebar(e: MouseEvent) {
+    e.preventDefault()
+    isResizingSidebar = true
+    document.addEventListener('mousemove', onResizeSidebar)
+    document.addEventListener('mouseup', stopResizeSidebar)
+  }
+
   function onResize(e: MouseEvent) {
     if (!isResizing) return
-    const containerWidth = window.innerWidth
-    const newWidth = (e.clientX / containerWidth) * 100
+    const containerWidth = window.innerWidth - sidebarWidth
+    const newWidth = ((e.clientX - sidebarWidth) / containerWidth) * 100
     leftPaneWidth = Math.min(Math.max(newWidth, 20), 80)
+  }
+
+  function onResizeSidebar(e: MouseEvent) {
+    if (!isResizingSidebar) return
+    sidebarWidth = Math.min(Math.max(e.clientX, 150), 400)
   }
 
   function stopResize() {
     isResizing = false
     document.removeEventListener('mousemove', onResize)
     document.removeEventListener('mouseup', stopResize)
-    // Auto-fit PDF after resize
-    fitWidth()
+  }
+
+  function stopResizeSidebar() {
+    isResizingSidebar = false
+    document.removeEventListener('mousemove', onResizeSidebar)
+    document.removeEventListener('mouseup', stopResizeSidebar)
   }
 
   // ========================================
@@ -849,28 +1340,39 @@ date: ${new Date().toISOString().split('T')[0]}
     const files = e.dataTransfer?.files
     if (!files || files.length === 0) return
 
-    const file = files[0]
-    if (
-      !file.name.endsWith('.md') &&
-      !file.name.endsWith('.markdown') &&
-      !file.name.endsWith('.txt')
-    ) {
-      return
-    }
-
-    // filename derivation logic is implicit in reactivity
-    // But wait, filename is derived from MARKDOWN content's H1.
-    // The drop sets the markdown content.
-
-    // Read logic
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const content = event.target?.result
-      if (typeof content === 'string') {
-        markdown = content
+    Array.from(files).forEach((file) => {
+      if (
+        !file.name.endsWith('.md') &&
+        !file.name.endsWith('.markdown') &&
+        !file.name.endsWith('.txt')
+      ) {
+        return
       }
-    }
-    reader.readAsText(file)
+
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const content = event.target?.result
+        if (typeof content === 'string') {
+          const newNode: FileNode = {
+            id: crypto.randomUUID(),
+            name: file.name,
+            type: 'file',
+            content,
+          }
+          const workspaceRoot = fileSystem.find(
+            (n) => n.id === 'workspace-root',
+          )
+          if (workspaceRoot && workspaceRoot.children) {
+            workspaceRoot.children.push(newNode)
+            workspaceRoot.isOpen = true
+          } else {
+            fileSystem.push(newNode)
+          }
+          handleSelectFile(newNode)
+        }
+      }
+      reader.readAsText(file)
+    })
   }
 
   function fitWidth() {
@@ -879,6 +1381,15 @@ date: ${new Date().toISOString().split('T')[0]}
     if (pdfViewerContainerEl.offsetParent === null) return
     pdfViewer.currentScaleValue = 'page-width'
   }
+
+  $effect(() => {
+    if (!pdfViewerContainerEl || !browser) return
+    const observer = new ResizeObserver(() => {
+      fitWidth()
+    })
+    observer.observe(pdfViewerContainerEl)
+    return () => observer.disconnect()
+  })
 </script>
 
 <svelte:head>
@@ -928,6 +1439,7 @@ date: ${new Date().toISOString().split('T')[0]}
     style="display: none;"
     bind:this={fileInputEl}
     onchange={onFileSelected}
+    multiple
   />
 
   <!-- Navbar -->
@@ -1092,6 +1604,29 @@ date: ${new Date().toISOString().split('T')[0]}
               {lang === 'zh' ? '查看帮助' : 'Help & Guide'}
             </button>
 
+            <button
+              class="menu-item"
+              onclick={() => {
+                if (
+                  confirm(
+                    lang === 'zh'
+                      ? '确定要重置并按照当前语言重新初始化文件系统吗？'
+                      : 'Reset and re-localize file system?',
+                  )
+                ) {
+                  seedFileSystem()
+                  const defaultId = lang === 'zh' ? 'welcome-zh' : 'welcome-en'
+                  activeFileId = defaultId
+                  const node = findNodeById(fileSystem, defaultId)
+                  if (node) markdown = node.content || ''
+                }
+                closeMenu()
+              }}
+            >
+              <span class="menu-icon">🧹</span>
+              {lang === 'zh' ? '重置文件系统' : 'Reset File System'}
+            </button>
+
             <div class="menu-divider"></div>
 
             <a href="/{lang}/resources/" class="menu-item">
@@ -1117,11 +1652,55 @@ date: ${new Date().toISOString().split('T')[0]}
 
   <!-- Workspace -->
   <main class="workspace">
+    <!-- Sidebar -->
+    <aside class="sidebar hidden-mobile" style="width: {sidebarWidth}px">
+      <div class="sidebar-header">
+        <span>{lang === 'zh' ? '工作区' : 'WORKSPACE'}</span>
+        <div class="header-actions">
+          <button title="New File" onclick={() => handleCreateFile(null)}
+            >📄+</button
+          >
+          <button title="New Folder" onclick={() => handleCreateFolder(null)}
+            >📁+</button
+          >
+        </div>
+      </div>
+      <div class="sidebar-list">
+        {#each fileSystem as node (node.id)}
+          <SidebarItem
+            {node}
+            {activeFileId}
+            onSelect={handleSelectFile}
+            onToggleFolder={handleToggleFolder}
+            onCreateFile={handleCreateFile}
+            onCreateFolder={handleCreateFolder}
+            onDelete={handleDeleteNode}
+            onRename={handleRenameNode}
+          />
+        {/each}
+      </div>
+      <div class="sidebar-footer">
+        <a href="/{lang}/resources/" class="sidebar-link">
+          <span class="sidebar-icon">🛠️</span>
+          <span>{lang === 'zh' ? '资源工具' : 'Resources'}</span>
+        </a>
+      </div>
+    </aside>
+
+    <!-- Sidebar Resizer -->
+    <div
+      class="resizer resizer-sidebar hidden-mobile"
+      class:active={isResizingSidebar}
+      onmousedown={startResizeSidebar}
+      role="separator"
+      aria-orientation="vertical"
+      tabindex="0"
+    ></div>
     <!-- Editor Pane -->
     <section
       class="pane editor-pane"
       class:mobile-hidden={activeMobileTab !== 'editor'}
-      style="width: {leftPaneWidth}%"
+      style="width: calc((100% - {sidebarWidth}px - 4px) * {leftPaneWidth} / 100)"
     >
       <div class="editor-host" bind:this={editorContainerEl}></div>
       {#if errorMessage}
@@ -1162,19 +1741,32 @@ date: ${new Date().toISOString().split('T')[0]}
     <section
       class="pane preview-pane"
       class:mobile-hidden={activeMobileTab !== 'preview'}
-      style="width: {100 - leftPaneWidth}%"
+      style="width: calc((100% - {sidebarWidth}px - 4px) * {100 -
+        leftPaneWidth} / 100)"
     >
       <div class="preview-toolbar">
-        <div class="pager">
-          <button
-            onclick={() => pdfPage > 1 && (pdfPage -= 1)}
-            disabled={!pdfDoc || pdfPage <= 1}>←</button
-          >
-          <span class="page-info">{pdfPage} / {pdfPages || '—'}</span>
-          <button
-            onclick={() => pdfPages && pdfPage < pdfPages && (pdfPage += 1)}
-            disabled={!pdfDoc || pdfPage >= pdfPages}>→</button
-          >
+        <div class="preview-status-wrapper">
+          <div class="pager">
+            <button
+              onclick={() => pdfPage > 1 && (pdfPage -= 1)}
+              disabled={!pdfDoc || pdfPage <= 1}>←</button
+            >
+            <span class="page-info">{pdfPage} / {pdfPages || '—'}</span>
+            <button
+              onclick={() => pdfPages && pdfPage < pdfPages && (pdfPage += 1)}
+              disabled={!pdfDoc || pdfPage >= pdfPages}>→</button
+            >
+          </div>
+          {#if status === 'compiling'}
+            <div class="compiling-badge">
+              <div class="spinner-xs"></div>
+              <span>{lang === 'zh' ? '正在排版...' : 'Typing...'}</span>
+            </div>
+          {:else if status === 'error'}
+            <div class="error-badge">
+              <span>⚠️ {lang === 'zh' ? '编译失败' : 'Failed'}</span>
+            </div>
+          {/if}
         </div>
         <div class="zoom">
           <span class="zoom-level">{Math.round(pdfScale * 100)}%</span>
@@ -1319,9 +1911,102 @@ date: ${new Date().toISOString().split('T')[0]}
 	   Workspace
 	   ======================================== */
   .workspace {
-    display: flex;
     flex: 1;
+    display: flex;
     overflow: hidden;
+    background-color: var(--color-gray-100);
+  }
+
+  /* Sidebar */
+  .sidebar {
+    height: 100%;
+    background-color: var(--color-gray-50);
+    border-right: 1px solid var(--color-gray-200);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    padding: var(--space-md);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--color-gray-400);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  .header-actions button {
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--color-gray-400);
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+
+  .header-actions button:hover {
+    background-color: var(--color-gray-200);
+    color: var(--color-gray-900);
+  }
+
+  .sidebar-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-xs);
+  }
+
+  .sidebar-footer {
+    padding: var(--space-md);
+    border-top: 1px solid var(--color-gray-200);
+  }
+
+  .sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-gray-500);
+    text-decoration: none;
+  }
+
+  .sidebar-link:hover {
+    color: var(--color-gray-900);
+  }
+
+  /* Resizers */
+  .resizer {
+    width: var(--divider-width);
+    background: var(--color-gray-200);
+    cursor: col-resize;
+    flex-shrink: 0;
+    position: relative;
+    transition: background var(--transition-fast);
+  }
+
+  .resizer:hover,
+  .resizer.active {
+    background: var(--color-gray-400);
+  }
+
+  /* Specific Resizers if needed */
+  .resizer-sidebar {
+    width: 2px;
+  }
+  .resizer-sidebar:hover,
+  .resizer-sidebar.active {
+    width: 4px;
   }
 
   /* Editor Pane */
@@ -1390,6 +2075,60 @@ date: ${new Date().toISOString().split('T')[0]}
     flex: 1;
     overflow: hidden;
     position: relative;
+  }
+
+  .preview-status-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+  }
+
+  .compiling-badge,
+  .error-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 12px;
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  .compiling-badge {
+    background: var(--color-gray-100);
+    color: var(--color-gray-600);
+  }
+
+  .error-badge {
+    background: #fef2f2;
+    color: #ef4444;
+  }
+
+  .spinner-xs {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--color-gray-300);
+    border-top-color: var(--color-gray-600);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-2px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .pdfjs-container {
