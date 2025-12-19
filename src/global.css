@@ -198,7 +198,7 @@ a:focus-visible {
    ======================================== */
 :root {
   --navbar-height: 52px;
-  --editor-bg: var(--color-gray-900);
+  --editor-bg: #282c34; /* Match One Dark theme */
   --preview-bg: var(--color-gray-100);
   --divider-width: 6px;
   --paper-shadow: 0 4px 20px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);

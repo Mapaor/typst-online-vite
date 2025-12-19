@@ -9,6 +9,13 @@
   import type { UILang } from '$lib/i18n/lang'
   import { renderMermaidToSvg } from '$lib/mermaid/render'
 
+  // CodeMirror 6 Imports
+  import { EditorView, basicSetup } from 'codemirror'
+  import { EditorState } from '@codemirror/state'
+  import { markdown as langMarkdown } from '@codemirror/lang-markdown'
+  import { languages } from '@codemirror/language-data'
+  import { oneDark } from '@codemirror/theme-one-dark'
+
   import 'pdfjs-dist/web/pdf_viewer.css'
 
   import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
@@ -367,6 +374,11 @@ date: ${new Date().toISOString().split('T')[0]}
   // SEO Content
   let seoHtml = $derived(markdownToHtml(initialMarkdown || ''))
 
+  // CodeMirror instance
+  let editorView = $state<EditorView | null>(null)
+  let editorContainerEl = $state<HTMLDivElement | null>(null)
+  let suppressEditorUpdate = false
+
   let status: 'idle' | 'compiling' | 'done' | 'error' = $state('idle')
   let errorMessage: string | null = $state(null)
   let pdfBytes = $state<Uint8Array | null>(null)
@@ -482,6 +494,38 @@ date: ${new Date().toISOString().split('T')[0]}
 
       // Trigger first compile
       void compile(markdown, style, lang)
+
+      // Initialize CodeMirror
+      if (editorContainerEl) {
+        const startState = EditorState.create({
+          doc: markdown,
+          extensions: [
+            basicSetup,
+            langMarkdown({ codeLanguages: languages }),
+            oneDark,
+            EditorView.lineWrapping,
+            EditorView.updateListener.of((update) => {
+              if (update.docChanged && !suppressEditorUpdate) {
+                markdown = update.state.doc.toString()
+              }
+            }),
+            EditorView.theme({
+              '&': {
+                height: '100%',
+                fontSize: '14px',
+              },
+              '.cm-scroller': {
+                fontFamily: 'var(--font-mono)',
+              },
+            }),
+          ],
+        })
+
+        editorView = new EditorView({
+          state: startState,
+          parent: editorContainerEl,
+        })
+      }
     })().catch((error) => {
       console.error(error)
       isLoading = false
@@ -563,6 +607,21 @@ date: ${new Date().toISOString().split('T')[0]}
 
     return () => {
       if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
+    }
+  })
+
+  // Watch markdown state changes from outside (e.g. templates)
+  $effect(() => {
+    if (editorView && markdown !== editorView.state.doc.toString()) {
+      suppressEditorUpdate = true
+      editorView.dispatch({
+        changes: {
+          from: 0,
+          to: editorView.state.doc.length,
+          insert: markdown,
+        },
+      })
+      suppressEditorUpdate = false
     }
   })
 
@@ -1064,12 +1123,7 @@ date: ${new Date().toISOString().split('T')[0]}
       class:mobile-hidden={activeMobileTab !== 'editor'}
       style="width: {leftPaneWidth}%"
     >
-      <textarea
-        class="editor"
-        bind:value={markdown}
-        spellcheck="false"
-        placeholder={t('placeholder')}
-      ></textarea>
+      <div class="editor-host" bind:this={editorContainerEl}></div>
       {#if errorMessage}
         <div class="error-bar">{errorMessage}</div>
       {/if}
@@ -1237,6 +1291,31 @@ date: ${new Date().toISOString().split('T')[0]}
   }
 
   /* ========================================
+	   Panes
+	   ======================================== */
+  .pane {
+    flex-shrink: 0;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    background: #fff;
+  }
+
+  .editor-host {
+    flex: 1;
+    height: 100%;
+    overflow: hidden;
+    background-color: #282c34; /* One Dark background placeholder */
+  }
+
+  .editor-host :global(.cm-editor) {
+    height: 100%;
+    outline: none;
+  }
+
+  /* ========================================
 	   Workspace
 	   ======================================== */
   .workspace {
@@ -1245,30 +1324,10 @@ date: ${new Date().toISOString().split('T')[0]}
     overflow: hidden;
   }
 
-  .pane {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
   /* Editor Pane */
   .editor-pane {
     background: var(--editor-bg);
     position: relative;
-  }
-
-  .editor {
-    flex: 1;
-    width: 100%;
-    padding: var(--space-lg);
-    font-family: var(--font-mono);
-    font-size: 0.875rem;
-    line-height: 1.7;
-    color: var(--color-gray-200);
-    background: transparent;
-    border: none;
-    resize: none;
-    outline: none;
   }
 
   .editor::placeholder {
