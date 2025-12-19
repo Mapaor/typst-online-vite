@@ -4,6 +4,7 @@
   import { onMount, tick } from 'svelte'
   import { getPdfjs } from '$lib/pdf/pdfjs'
   import { markdownToTypst } from '$lib/pipeline/markdownToTypst'
+  import { markdownToHtml } from '$lib/pipeline/markdownToHtml'
   import { TypstWorkerClient } from '$lib/workers/typstClient'
   import type { UILang } from '$lib/i18n/lang'
   import { renderMermaidToSvg } from '$lib/mermaid/render'
@@ -362,6 +363,9 @@ date: ${new Date().toISOString().split('T')[0]}
 
     return `${base} - mdxport.com`
   })
+
+  // SEO Content
+  let seoHtml = $derived(markdownToHtml(initialMarkdown || ''))
 
   let status: 'idle' | 'compiling' | 'done' | 'error' = $state('idle')
   let errorMessage: string | null = $state(null)
@@ -1135,6 +1139,11 @@ date: ${new Date().toISOString().split('T')[0]}
       </div>
     </section>
   </main>
+
+  <!-- Hidden SEO Content for Search Engines -->
+  <div class="visually-hidden" aria-hidden="false">
+    {@html seoHtml}
+  </div>
 </div>
 
 <style>

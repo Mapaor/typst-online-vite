@@ -204,10 +204,9 @@ a:focus-visible {
   --paper-shadow: 0 4px 20px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
 }
 
-/* Full-screen layout */
+/* Full-screen layout - Removed global overflow: hidden to allow scrolling on non-editor pages */
 html, body {
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
 }
 
 /* Loading Overlay */
