@@ -91,9 +91,9 @@ AI 生成的 Markdown 通常在“视觉上没问题”但“结构上不完整�
 
 | 工具 | 优劣对比 |
 | :--- | :--- |
-| **Pandoc** | **学术界的金标准，但配置是噩梦。** <br> Pandoc 功能强大，但通常需要手动安装二进制环境、数 GB 的 LaTeX 工具链，并调试晦涩的模板错误。**MDXport 的不同之处**：零配置，无需安装工具链；视觉反馈，实时查看预检问题。 |
-| **Notion** | **非常适合 Wiki，但在导出为固定格式时有局限性。** <br> Notion 文档是“流式”的，针对屏幕阅读优化，直接导出 PDF 有时会遇到宽表格截断等挑战。**MDXport 的尝试**：提供固定布局选项，针对 A4 打印优化；Git 友好，保持源码为 Markdown。 |
-| **Typora** | **优秀的编辑器，偏向个人写作体验。** <br> Typora 为写作而生，而非流水线发布。PDF 输出结果可能受到本地 CSS 样式和特定排版配置的影响。**MDXport 的不同之处**：致力于提供 100% 可重现的流程；关注团队一致性，无论 OS 如何，力求提供统一的边距和布局。 |
+| **Pandoc** | **学术界的金标准，但配置是噩梦。** Pandoc 功能强大，但通常需要手动安装二进制环境、数 GB 的 LaTeX 工具链，并调试晦涩的模板错误。**MDXport 的不同之处**：零配置，无需安装工具链；视觉反馈，实时查看预检问题。 |
+| **Notion** | **非常适合 Wiki，但在导出为固定格式时有局限性。** Notion 文档是“流式”的，针对屏幕阅读优化，直接导出 PDF 有时会遇到宽表格截断等挑战。**MDXport 的尝试**：提供固定布局选项，针对 A4 打印优化；Git 友好，保持源码为 Markdown。 |
+| **Typora** | **优秀的编辑器，偏向个人写作体验。** Typora 为写作而生，而非流水线发布。PDF 输出结果可能受到本地 CSS 样式和特定排版配置的影响。**MDXport 的不同之处**：致力于提供 100% 可重现的流程；关注团队一致性，无论 OS 如何，力求提供统一的边距和布局。 |
 
 ---
 
@@ -192,9 +192,9 @@ Don’t let your team mess up the fonts. In the future, you will be able to use 
 
 | Tool | Comparison |
 | :--- | :--- |
-| **Pandoc** | **The gold standard for academics, but a nightmare to configure.** <br> Pandoc is powerful, but usually requires manual installation of binaries, LaTeX toolchains, and debugging obscure template errors. **MDXport difference**: Zero Setup, Visual Feedback, Modern Defaults. |
-| **Notion** | **Great for wikis, but has limitations for frozen deliverables.** <br> Notion documents are "fluid"—optimized for screens. Directly exporting to PDF can sometimes encounter challenges with ultra-wide tables. **MDXport's approach**: Fixed Layout, Repo-Friendly, Local-First. |
-| **Typora** | **Excellent editor, focused on personal writing experience.** <br> Typora is designed for writing, not automated publishing pipelines. PDF output can vary based on local CSS themes and specific configurations. **MDXport difference**: Aims for a 100% reproducible pipeline; team consistency across OS with unified margins and fonts. |
+| **Pandoc** | **The gold standard for academics, but a nightmare to configure.** Pandoc is powerful, but usually requires manual installation of binaries, LaTeX toolchains, and debugging obscure template errors. **MDXport difference**: Zero Setup, Visual Feedback, Modern Defaults. |
+| **Notion** | **Great for wikis, but has limitations for frozen deliverables.** Notion documents are "fluid"—optimized for screens. Directly exporting to PDF can sometimes encounter challenges with ultra-wide tables. **MDXport's approach**: Fixed Layout, Repo-Friendly, Local-First. |
+| **Typora** | **Excellent editor, focused on personal writing experience.** Typora is designed for writing, not automated publishing pipelines. PDF output can vary based on local CSS themes and specific configurations. **MDXport difference**: Aims for a 100% reproducible pipeline; team consistency across OS with unified margins and fonts. |
 
 ---
 
