@@ -120,8 +120,8 @@ async function compilePdf(
 ): Promise<{ pdf: Uint8Array; diagnostics: string[] }> {
 	// Check for special characters
 	const hasCjk = /[\u4e00-\u9fa5]/.test(mainTypst);
-	// Broad emoji detection regex
-	const hasEmoji = /[\u{1F000}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(mainTypst);
+	// Broad emoji detection regex (ES5 compatible)
+	const hasEmoji = /[\uD800-\uDFFF]|[\u2600-\u26FF]|[\u2700-\u27BF]/.test(mainTypst);
 	
 	if (hasCjk || hasEmoji) {
 		await upgradeCompiler(hasCjk, hasEmoji);

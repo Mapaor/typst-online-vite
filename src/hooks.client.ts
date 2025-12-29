@@ -1,3 +1,2 @@
-import { injectAnalytics } from '@vercel/analytics/sveltekit'
+// Analytics removed for minimal editor
 
-injectAnalytics()
