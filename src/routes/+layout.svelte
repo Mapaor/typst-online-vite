@@ -5,6 +5,7 @@
 </script>
 
 <svelte:head>
+	<title>Typst Online</title>
 	<link rel="icon" href="/favicon.ico" />
 </svelte:head>
 

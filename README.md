@@ -1,6 +1,6 @@
 # Typst Online Editor
 
-A lightweight web-based Typst editor that compiles documents directly in your browser using WebAssembly. No servers, no data collection, just pure client-side compilation.
+A lightweight web-based Typst editor that compiles documents directly in your browser using WebAssembly. No servers, everything client-side.
 
 ## Tech used
 
