@@ -1,111 +1,86 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { TypstWorkerClient } from '$lib/workers/typstClient'
-  import { getPdfjs } from '$lib/pdf/pdfjs'
-  import type { PDFDocumentProxy } from 'pdfjs-dist'
-  
-  console.log('[Debug] Component loaded')
+  import { TypstCompilerService, type CompileStatus } from '$lib/typst/TypstCompilerService'
+  import { debounce, downloadPdfFromUrl } from '$lib/utils/helpers'
   
   let typstCode = $state(`= Hello Typst
 
 This is a test.`)
-  let status = $state<'idle' | 'compiling' | 'done' | 'error'>('idle')
-  let client = $state<TypstWorkerClient | null>(null)
-  let pdfBytes = $state<Uint8Array<ArrayBuffer> | null>(null)
+  let status = $state<CompileStatus>('idle')
   let pdfUrl = $state<string | null>(null)
   let errorMsg = $state<string | null>(null)
-  let compileCount = $state(0)
-  let autoCompileTimer: number | null = null
   
-  console.log('[Debug] Initial state set')
+  let compilerService: TypstCompilerService | null = null
+  let debouncedCompile: ReturnType<typeof debounce> | null = null
   
-  // Auto-compile on code changes (debounced)
+  // Watch for code changes and trigger debounced compile
   $effect(() => {
     const code = typstCode
-    
-    if (autoCompileTimer) window.clearTimeout(autoCompileTimer)
-    
-    autoCompileTimer = window.setTimeout(() => {
-      if (client) {
-        console.log('[Debug] Auto-compile triggered')
-        void compile()
-      }
-    }, 1000) // 1 second debounce
-    
-    return () => {
-      if (autoCompileTimer) window.clearTimeout(autoCompileTimer)
+    if (debouncedCompile && compilerService) {
+      debouncedCompile(code)
     }
   })
   
   onMount(() => {
-    console.log('[Debug] onMount called')
-    client = new TypstWorkerClient()
-    console.log('[Debug] Worker client created')
+    // Initialize compiler service
+    compilerService = new TypstCompilerService()
+    
+    // Listen to compile events
+    const unsubscribe = compilerService.addListener({
+      onStatusChange: (newStatus) => {
+        status = newStatus
+      },
+      onSuccess: (pdf, url) => {
+        pdfUrl = url
+        errorMsg = null
+      },
+      onError: (error) => {
+        errorMsg = error
+        pdfUrl = null
+      },
+    })
+    
+    // Create debounced compile function
+    debouncedCompile = debounce(async (code: string) => {
+      if (compilerService) {
+        await compilerService.compile(code)
+      }
+    }, 1000)
     
     return () => {
-      if (pdfUrl) URL.revokeObjectURL(pdfUrl)
+      debouncedCompile?.cancel()
+      unsubscribe()
+      compilerService?.dispose()
     }
   })
   
-  async function compile() {
-    if (!client) {
-      console.log('[Debug] Compile skipped: no client')
-      return
-    }
-    
-    compileCount++
-    const currentCompile = compileCount
-    console.log(`[Debug] Starting compile #${currentCompile}`)
-    status = 'compiling'
-    errorMsg = null
-    
-    try {
-      const result = await client.compilePdf(typstCode, {})
-      if (currentCompile !== compileCount) {
-        console.log(`[Debug] Compile #${currentCompile} cancelled`)
-        return
-      }
-      console.log(`[Debug] Compile #${currentCompile} succeeded, PDF size: ${result.pdf.length} bytes`)
-      
-      // Create blob URL for PDF
-      if (pdfUrl) URL.revokeObjectURL(pdfUrl)
-      const blob = new Blob([result.pdf], { type: 'application/pdf' })
-      pdfUrl = URL.createObjectURL(blob)
-      pdfBytes = result.pdf
-      
-      status = 'done'
-    } catch (error) {
-      if (currentCompile !== compileCount) {
-        console.log(`[Debug] Compile #${currentCompile} error cancelled`)
-        return
-      }
-      console.error(`[Debug] Compile #${currentCompile} failed:`, error)
-      status = 'error'
-      errorMsg = error instanceof Error ? error.message : String(error)
+  async function handleCompileNow() {
+    if (compilerService) {
+      await compilerService.compile(typstCode)
     }
   }
   
-  function downloadPdf() {
-    if (!pdfUrl) return
-    const a = document.createElement('a')
-    a.href = pdfUrl
-    a.download = 'document.pdf'
-    a.click()
+  function handleDownload() {
+    if (pdfUrl) {
+      downloadPdfFromUrl(pdfUrl, 'document.pdf')
+    }
   }
 </script>
 
 <div class="editor-container">
   <div class="navbar">
-    <h1 class="title">Typst Editor (Debug Mode)</h1>
+    <h1 class="title">Typst Online Editor</h1>
     <div class="status">
-      Status: {status}
-      {#if client}✓ Worker Ready{:else}⏳ Loading...{/if}
+      {#if status === 'compiling'}⏳ Compiling...
+      {:else if status === 'done'}✅ Ready
+      {:else if status === 'error'}❌ Error
+      {:else}Ready{/if}
     </div>
-    <button class="btn" onclick={compile} disabled={!client || status === 'compiling'}>
+    <button class="btn" onclick={handleCompileNow} disabled={status === 'compiling'}>
       Compile Now
     </button>
     {#if pdfUrl}
-      <button class="btn" onclick={downloadPdf}>Download PDF</button>
+      <button class="btn" onclick={handleDownload}>Download PDF</button>
     {/if}
   </div>
   
@@ -130,7 +105,7 @@ This is a test.`)
           {:else}
             <p>Click "Compile Now" to generate PDF</p>
           {/if}
-          <p style="margin-top: 1rem; font-size: 0.875rem;">Code: {typstCode.length} chars | Compiles: {compileCount}</p>
+          <p style="margin-top: 1rem; font-size: 0.875rem;">Code: {typstCode.length} chars</p>
         </div>
       {/if}
     </div>

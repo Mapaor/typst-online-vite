@@ -1,51 +1,29 @@
-<p align="center">
-  <img src="static/logo.png" alt="MDXport Logo" width="128" />
-</p>
+# Typst Online Editor
 
-# MDXport
+**A minimal, fast, and privacy-focused online editor for Typst.**
 
-**Markdown to PDF, Perfect Typesetting.**
-
-MDXport is a powerful Markdown export tool built with [Svelte](https://svelte.dev/) and [Typst](https://typst.app/). It allows you to convert Markdown into high-quality, business-ready PDFs directly in your browser.
+A lightweight web-based Typst editor that compiles documents directly in your browser using WebAssembly. No servers, no data collection, just pure client-side compilation.
 
 ## ✨ Features
 
-- **Typst-Powered**: Leverages the power of Typst for professional-grade typesetting.
-- **Privacy-First**: Runs entirely client-side using WebAssembly. Your data never leaves your browser.
-- **Real-time Preview**: Live side-by-side preview of your Markdown and the rendered PDF.
-- **Smart Formatting**: Automatically fixes common AI-generated Markdown issues like table overflows and hierarchy errors.
-- **Rich Syntax Support**:
-  - 📊 **Mermaid** diagrams
-  - 📐 **Math** formulas (LaTeX syntax)
-  - 💻 **Syntax Highlighting** for code blocks
-  - 📑 **Auto-generated Table of Contents**
-- **No Setup**: No installation or account required. Just open and use.
-
-## 📸 Screenshots
-
-<p align="center">
-  <img src="static/screenshots/screenshot_editor.png" alt="MDXport Editor Interface" width="100%" />
-  <br>
-  <em>Split-screen editing with real-time PDF preview</em>
-</p>
-
-<p align="center">
-  <img src="static/screenshots/screenshot_features.png" alt="MDXport Features" width="100%" />
-  <br>
-  <em>Rich support for Math, Mermaid diagrams, and Charts</em>
-</p>
+- **Pure Client-Side**: Runs entirely in your browser using Typst WASM. Your documents never leave your device.
+- **Real-Time Compilation**: Automatic compilation as you type with smart debouncing.
+- **Live PDF Preview**: Instant preview of your compiled PDF document.
+- **Fast & Lightweight**: Minimal dependencies, optimized for performance.
+- **No Setup Required**: No installation, no account, no configuration. Just open and start writing.
+- **Offline-Ready**: Works without an internet connection once loaded.
 
 ## 🚀 Quick Start
 
-Visit [mdxport.com](https://mdxport.com) to start using it immediately.
+### Online
+
+Visit the hosted version (add your deployment URL here) to start using it immediately.
 
 ### Local Development
 
-If you want to run MDXport locally:
-
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/cosformula/mdxport.git
+   git clone https://github.com/yourusername/mdxport.git
    cd mdxport
    ```
 
@@ -64,13 +42,42 @@ If you want to run MDXport locally:
    npm run build
    ```
 
+## 🏗️ Architecture
+
+This project uses a **framework-agnostic architecture** that separates UI from business logic, making it easy to port to other frameworks (React, Vue, Angular, etc.).
+
+### Core Structure
+- **Framework-Agnostic Layers**:
+  - `TypstCompilerService` - Manages compilation with event-based API
+  - `TypstWorkerClient` - Web Worker client for background compilation
+  - `typst.worker.ts` - WASM compiler running in worker thread
+  - Pure TypeScript, zero framework dependencies
+
+- **UI Layer** (Framework-Specific):
+  - `TypstEditor.svelte` - Svelte 5 component (easily replaceable)
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed documentation and migration examples.
+
 ## 🛠️ Tech Stack
 
-- **Framework**: [Svelte 5](https://svelte.dev/)
-- **Typesetting**: [Typst](https://typst.app/) via WASM
-- **Markdown Handling**: [unified](https://unifiedjs.com/) ecosystem (remark)
+- **Framework**: [Svelte 5](https://svelte.dev/) + [SvelteKit](https://kit.svelte.dev/)
+- **Typesetting**: [Typst](https://typst.app/) via [@myriaddreamin/typst.ts](https://github.com/Myriad-Dreamin/typst.ts)
 - **PDF Preview**: [PDF.js](https://mozilla.github.io/pdf.js/)
-- **Icons**: [Lucide](https://lucide.dev/) (via SVG)
+- **Build Tool**: [Vite](https://vitejs.dev/)
+
+## 📦 Key Dependencies
+
+- `@myriaddreamin/typst.ts` - Typst WASM compiler
+- `pdfjs-dist` - PDF rendering
+- `svelte` - UI framework
+- All compilation logic is framework-agnostic TypeScript
+
+## 🎯 Why This Project?
+
+- **Privacy**: No server-side processing means your documents stay private
+- **Speed**: WASM compilation is fast and runs locally
+- **Simplicity**: Minimal features, maximum usability
+- **Portable**: Framework-agnostic core makes migration easy
 
 ## 📄 License
 
@@ -78,4 +85,5 @@ This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-[中文说明 (Chinese README)](README_zh.md)
+Built with ❤️ using [Typst](https://typst.app/) and [Svelte](https://svelte.dev/)
+

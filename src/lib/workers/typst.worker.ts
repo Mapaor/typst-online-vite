@@ -2,8 +2,6 @@
 
 import { createTypstCompiler, loadFonts, type TypstCompiler } from '@myriaddreamin/typst.ts';
 import typstCompilerWasmUrl from '@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm?url';
-import modernTechTyp from '../typst/styles/modern-tech.typ?raw';
-import classicEditorialTyp from '../typst/styles/classic-editorial.typ?raw';
 
 type CompileRequest = {
 	type: 'compile';
@@ -85,8 +83,6 @@ async function upgradeCompiler(needCjk: boolean, needEmoji: boolean) {
 			})
 		]
 	});
-	newCompiler.addSource('/styles/modern-tech.typ', modernTechTyp);
-	newCompiler.addSource('/styles/classic-editorial.typ', classicEditorialTyp);
 	
 	// Swap the compiler promise
 	compilerPromise = Promise.resolve(newCompiler);
@@ -106,8 +102,6 @@ function getCompiler(): Promise<TypstCompiler> {
 				})
 			]
 		});
-		compiler.addSource('/styles/modern-tech.typ', modernTechTyp);
-		compiler.addSource('/styles/classic-editorial.typ', classicEditorialTyp);
 		return compiler;
 	})();
 
